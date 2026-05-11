@@ -85,6 +85,9 @@ defmodule GoodAnalytics.MixProject do
       # HTTP client (connector delivery)
       {:req, "~> 0.5"},
 
+      # OpenAPI spec generation
+      {:open_api_spex, "~> 3.21"},
+
       # User agent parsing
       {:ua_inspector, "~> 3.0"},
 
