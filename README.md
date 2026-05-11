@@ -29,7 +29,7 @@ Add `good_analytics` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:good_analytics, github: "agoodway/goodanalytics_core"}
+    {:good_analytics, github: "agoodway/goodanalytics"}
   ]
 end
 ```
@@ -450,7 +450,7 @@ This runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format --che
 
 ## Repository Structure
 
-This package lives in the `core/` directory of the [goodanalytics monorepo](https://github.com/agoodway/goodanalytics). The monorepo also contains:
+This package lives in the `core/` directory of the [goodanalytics_pro monorepo](https://github.com/agoodway/goodanalytics_pro). The monorepo also contains:
 
 - **`pro/`** — GoodAnalytics Pro, a full Phoenix application with dashboard UI, team management, and workspace administration
 - **`docs/`** — Architecture documentation and data model reference
