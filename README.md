@@ -1,4 +1,4 @@
-# GoodAnalytics Core
+# GoodAnalytics
 
 Visitor intelligence, link tracking, source attribution, and behavioral analytics for Phoenix.
 
@@ -34,14 +34,14 @@ def deps do
 end
 ```
 
-### As a Path Dependency (Monorepo)
+### As a Path Dependency
 
-If you're working within the goodanalytics monorepo:
+For local development against a checkout of this repo:
 
 ```elixir
 def deps do
   [
-    {:good_analytics, path: "../core"}
+    {:good_analytics, path: "../goodanalytics"}
   ]
 end
 ```
@@ -551,10 +551,9 @@ end
 
 ## Testing
 
-### Running the Core Test Suite
+### Running the Test Suite
 
 ```bash
-cd core
 mix deps.get
 mix test.setup     # creates the test database
 mix test
@@ -583,19 +582,6 @@ mix quality
 ```
 
 This runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format --check-formatted`, `sobelow`, `ex_dna`, `doctor`, and `credo --strict`.
-
-## Repository Structure
-
-This package lives in the `core/` directory of the [goodanalytics_pro monorepo](https://github.com/agoodway/goodanalytics_pro). The monorepo also contains:
-
-- **`pro/`** — GoodAnalytics Pro, a full Phoenix application with dashboard UI, team management, and workspace administration
-- **`docs/`** — Architecture documentation and data model reference
-- **`openspec/`** — Feature specifications
-
-## Documentation
-
-- [Architecture](../docs/architecture.md) — System design, identity resolution algorithm, hook system, module structure, and data flows
-- [Data Model](../docs/data_model.md) — Complete column-level schema reference for all `ga_` tables
 
 ## License
 
