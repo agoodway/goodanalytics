@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.TimelineResponse do
+  @moduledoc """
+  Single event entry in a visitor timeline.
+
+  Represents one recorded event with source, revenue, and contextual
+  metadata at event time.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

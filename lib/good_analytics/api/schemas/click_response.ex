@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.ClickResponse do
+  @moduledoc """
+  Link click event resource returned by the API.
+
+  Captures click context such as URL, referrer, client metadata, and event
+  timestamp.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

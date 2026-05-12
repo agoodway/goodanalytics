@@ -12,6 +12,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
   alias GoodAnalytics.Connectors.Signals
   alias GoodAnalytics.Core.{Events.Recorder, IdentityResolver, Links}
+  alias GoodAnalytics.Geo
 
   @valid_event_types ~w(link_click pageview session_start identify lead sale share engagement custom)
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
@@ -84,6 +85,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
             }
 
             Recorder.record(visitor, event_type, event_attrs)
+            Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
             json(conn, %{status: "ok"})
         end
 
@@ -164,6 +166,8 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
           {:error, _changeset} ->
             :ok
         end
+
+        Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
 
         json(conn, %{
           status: "ok",

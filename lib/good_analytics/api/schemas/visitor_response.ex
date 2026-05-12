@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.VisitorResponse do
+  @moduledoc """
+  Full visitor resource returned by the API.
+
+  Combines identity, attribution, geo/device enrichment, and lifecycle
+  aggregate metrics.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{
@@ -8,7 +14,10 @@ defmodule GoodAnalytics.Api.Schemas.VisitorResponse do
     properties: %{
       id: %OpenApiSpex.Schema{type: :string, format: :uuid},
       workspace_id: %OpenApiSpex.Schema{type: :string, format: :uuid},
-      status: %OpenApiSpex.Schema{type: :string, enum: ~w(anonymous identified lead customer churned)},
+      status: %OpenApiSpex.Schema{
+        type: :string,
+        enum: ~w(anonymous identified lead customer churned)
+      },
       person_external_id: %OpenApiSpex.Schema{type: :string, nullable: true},
       person_email: %OpenApiSpex.Schema{type: :string, nullable: true},
       person_name: %OpenApiSpex.Schema{type: :string, nullable: true},

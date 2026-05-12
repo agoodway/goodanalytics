@@ -1,4 +1,9 @@
 defmodule GoodAnalytics.Api.Schemas.LinkStatsResponse do
+  @moduledoc """
+  Aggregated performance metrics for a link.
+
+  Includes click, lead, sale, and revenue totals.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

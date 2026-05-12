@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Api.LinkControllerTest do
   use GoodAnalytics.DataCase, async: false
 
+  alias GoodAnalytics.Api.Router
+
   @workspace_id GoodAnalytics.default_workspace_id()
 
   setup do
@@ -16,18 +18,19 @@ defmodule GoodAnalytics.Api.LinkControllerTest do
     conn = Plug.Test.conn(method, path, body && Jason.encode!(body))
     conn = Plug.Conn.put_req_header(conn, "content-type", "application/json")
     conn = Plug.Conn.put_req_header(conn, "authorization", "Bearer test-token")
-    GoodAnalytics.Api.Router.call(conn, GoodAnalytics.Api.Router.init([]))
+    Router.call(conn, Router.init([]))
   end
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   describe "POST /links" do
     test "creates a link" do
-      conn = api_conn(:post, "/links", %{
-        domain: "test.link",
-        key: "promo",
-        url: "https://example.com/sale"
-      })
+      conn =
+        api_conn(:post, "/links", %{
+          domain: "test.link",
+          key: "promo",
+          url: "https://example.com/sale"
+        })
 
       assert conn.status == 201
       body = json_body(conn)
@@ -39,11 +42,12 @@ defmodule GoodAnalytics.Api.LinkControllerTest do
     test "returns 409 for duplicate domain/key" do
       create_link!(%{domain: "test.link", key: "dup"})
 
-      conn = api_conn(:post, "/links", %{
-        domain: "test.link",
-        key: "dup",
-        url: "https://example.com"
-      })
+      conn =
+        api_conn(:post, "/links", %{
+          domain: "test.link",
+          key: "dup",
+          url: "https://example.com"
+        })
 
       assert conn.status == 409
     end
@@ -123,12 +127,10 @@ defmodule GoodAnalytics.Api.LinkControllerTest do
       conn = api_conn(:delete, "/links/#{link.id}")
       assert conn.status == 204
 
-      # Verify it's archived
-      conn2 = api_conn(:get, "/links/#{link.id}")
-      # Archived links still exist but get_link/2 doesn't filter archived
-      # So we check via list (which excludes archived)
-      conn3 = api_conn(:get, "/links")
-      links = json_body(conn3)
+      # Archived links still exist but get_link/2 doesn't filter archived,
+      # so we check via list (which excludes archived).
+      conn2 = api_conn(:get, "/links")
+      links = json_body(conn2)
       refute Enum.any?(links, &(&1["id"] == link.id))
     end
 

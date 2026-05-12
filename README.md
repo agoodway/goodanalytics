@@ -114,7 +114,31 @@ mix setup
 
 The UA databases persist in `_build` and only need to be downloaded once.
 
-### 4. Mount Routes
+### 4. (Optional) Set Up Geo Enrichment
+
+Populates `visitor.geo` with country/region/city/timezone/coordinates and enables country-routed redirects via `link.geo_targeting`. Off by default; `Geo.lookup/1` returns `{:error, :geo_disabled}` until configured.
+
+Add `:locus` to your host app:
+
+```elixir
+{:locus, "~> 2.3"}
+```
+
+Get a MaxMind license key (free signup at https://www.maxmind.com/en/geolite2/signup) and configure:
+
+```elixir
+config :good_analytics, :geo,
+  provider: GoodAnalytics.Geo.Locus,
+  loader: {:maxmind, "GeoLite2-City"}
+
+config :locus, license_key: System.get_env("MAXMIND_LICENSE_KEY")
+```
+
+Locus auto-downloads the MMDB on boot and caches it in `~/.cache/locus_erlang`. Lookups are `:persistent_term`-backed and sub-millisecond. Look for `GoodAnalytics.Geo loader registered` in the logs to confirm; use `:ok = GoodAnalytics.Geo.Loader.await(30_000)` to block in release tasks.
+
+To use a non-MaxMind MMDB (DB-IP Lite, IPLocate, IP2Location LITE), configure a custom `:loader` and implement `GoodAnalytics.Geo.Normalizer` for that provider's fields. Only the MaxMind normalizer ships.
+
+### 5. Mount Routes
 
 Add GoodAnalytics routes to your Phoenix router:
 
@@ -159,7 +183,7 @@ end
 
 **Important:** Place the short link catch-all routes (`/:key`) last in your router to avoid intercepting other routes.
 
-### 5. Mount the REST API (Optional)
+### 6. Mount the REST API (Optional)
 
 GoodAnalytics includes a server-side REST API for event tracking, link management, and visitor queries. To enable it, configure an authentication callback and mount the API router.
 
@@ -197,7 +221,7 @@ forward "/ga/api", GoodAnalytics.Api.Router
 forward "/api/docs", GoodAnalytics.ApiSpec.Router
 ```
 
-### 6. Serve the JavaScript Client
+### 7. Serve the JavaScript Client
 
 Configure your endpoint to serve the JS tracking client:
 

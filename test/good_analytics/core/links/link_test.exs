@@ -76,6 +76,110 @@ defmodule GoodAnalytics.Core.Links.LinkTest do
       changeset = Link.changeset(%Link{}, attrs)
       assert changeset.valid?
     end
+
+    test "rejects geo_targeting with javascript: URL" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, %{"US" => "javascript:alert(1)"})
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+
+      assert %{geo_targeting: ["all values must be valid HTTP or HTTPS URLs"]} =
+               errors_on(changeset)
+    end
+
+    test "rejects geo_targeting with data: URL" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, %{"US" => "data:text/html,<script>"})
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+    end
+
+    test "rejects geo_targeting with empty string value" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, %{"US" => ""})
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+    end
+
+    test "rejects geo_targeting with nil value" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, %{"US" => nil})
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+    end
+
+    test "rejects geo_targeting with non-string value" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, %{"US" => 42})
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+    end
+
+    test "rejects geo_targeting that is not a map" do
+      # `cast` already rejects non-map values for a :map field — Ecto emits
+      # "is invalid" before our `validate_change` runs. Either error is fine
+      # as long as the value is rejected.
+      attrs = Map.put(@valid_attrs, :geo_targeting, "not a map")
+      changeset = Link.changeset(%Link{}, attrs)
+      refute changeset.valid?
+      assert errors_on(changeset)[:geo_targeting] != nil
+    end
+
+    test "nil geo_targeting becomes empty map" do
+      attrs = Map.put(@valid_attrs, :geo_targeting, nil)
+      changeset = Link.changeset(%Link{}, attrs)
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :geo_targeting) == %{}
+    end
+
+    test "normalizes geo_targeting keys to uppercase" do
+      attrs =
+        Map.put(@valid_attrs, :geo_targeting, %{
+          "de" => "https://de.example.com",
+          "fr" => "https://fr.example.com"
+        })
+
+      changeset = Link.changeset(%Link{}, attrs)
+      assert changeset.valid?
+
+      assert Ecto.Changeset.get_field(changeset, :geo_targeting) == %{
+               "DE" => "https://de.example.com",
+               "FR" => "https://fr.example.com"
+             }
+    end
+
+    test "accepts geo_targeting with valid HTTPS URLs" do
+      attrs =
+        Map.put(@valid_attrs, :geo_targeting, %{
+          "US" => "https://us.example.com",
+          "GB" => "http://gb.example.com"
+        })
+
+      changeset = Link.changeset(%Link{}, attrs)
+      assert changeset.valid?
+    end
+  end
+
+  describe "valid_http_url?/1" do
+    test "accepts http and https URLs with hosts" do
+      assert Link.valid_http_url?("https://example.com")
+      assert Link.valid_http_url?("http://example.com/path?x=1")
+    end
+
+    test "rejects javascript and data URIs" do
+      refute Link.valid_http_url?("javascript:alert(1)")
+      refute Link.valid_http_url?("data:text/html,<x>")
+    end
+
+    test "rejects URLs without a host" do
+      refute Link.valid_http_url?("https://")
+      refute Link.valid_http_url?("http:/no-host")
+    end
+
+    test "rejects non-binary input" do
+      refute Link.valid_http_url?(nil)
+      refute Link.valid_http_url?(42)
+      refute Link.valid_http_url?(%{})
+    end
+
+    test "rejects empty string" do
+      refute Link.valid_http_url?("")
+    end
   end
 
   defp errors_on(changeset) do

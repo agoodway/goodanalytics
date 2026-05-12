@@ -1,4 +1,9 @@
 defmodule GoodAnalytics.Api.Schemas.BatchEventParams do
+  @moduledoc """
+  Request body for submitting multiple server-side events.
+
+  Contains an `events` array with 1 to 100 `EventParams` items.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

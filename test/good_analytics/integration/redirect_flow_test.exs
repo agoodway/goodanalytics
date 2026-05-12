@@ -233,4 +233,182 @@ defmodule GoodAnalytics.Integration.RedirectFlowTest do
       assert result.status == 410
     end
   end
+
+  describe "geo-routed redirects" do
+    # Stub provider — returns canonical normalized geo for the test IP and
+    # leaves anything else as :not_found. Configured per-test via
+    # Application.put_env.
+    defmodule StubGeoProvider do
+      @behaviour GoodAnalytics.Geo.Provider
+
+      @impl true
+      def lookup({1, 2, 3, 4}),
+        do:
+          {:ok,
+           %{
+             "country" => %{"iso_code" => "DE", "names" => %{"en" => "Germany"}}
+           }}
+
+      def lookup(_), do: {:error, :not_found}
+    end
+
+    defmodule AlwaysTrue do
+      def enabled?(_workspace_id), do: true
+    end
+
+    defmodule AlwaysFalse do
+      def enabled?(_workspace_id), do: false
+    end
+
+    setup do
+      prev_geo = Application.get_env(:good_analytics, :geo)
+      prev_callback = Application.get_env(:good_analytics, :geo_routing_enabled_fn)
+
+      Application.put_env(:good_analytics, :geo,
+        provider: StubGeoProvider,
+        normalizer: GoodAnalytics.Geo.Normalizer.MaxMind
+      )
+
+      on_exit(fn ->
+        if prev_geo,
+          do: Application.put_env(:good_analytics, :geo, prev_geo),
+          else: Application.delete_env(:good_analytics, :geo)
+
+        if prev_callback,
+          do: Application.put_env(:good_analytics, :geo_routing_enabled_fn, prev_callback),
+          else: Application.delete_env(:good_analytics, :geo_routing_enabled_fn)
+      end)
+
+      :ok
+    end
+
+    defp geo_conn(path, remote_ip) do
+      conn(:get, path)
+      |> Map.put(:host, "test.link")
+      |> Map.put(:remote_ip, remote_ip)
+      |> Map.put(:query_params, URI.decode_query(URI.parse(path).query || ""))
+      |> Plug.Conn.fetch_query_params()
+      |> Plug.Conn.put_req_header("user-agent", "TestBot/1.0")
+      |> Plug.Conn.put_private(:phoenix_format, "html")
+    end
+
+    defp location_uri(result) do
+      [location] = Plug.Conn.get_resp_header(result, "location")
+      URI.parse(location)
+    end
+
+    test "geo routing ON returns the country-specific URL" do
+      Application.put_env(:good_analytics, :geo_routing_enabled_fn, {AlwaysTrue, :enabled?})
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://default.example.com/landing",
+          geo_targeting: %{"DE" => "https://de.example.com/landing"}
+        })
+
+      result =
+        Redirect.handle_redirect(geo_conn("/#{link.key}", {1, 2, 3, 4}), "test.link", link.key)
+
+      uri = location_uri(result)
+      assert uri.host == "de.example.com"
+    end
+
+    test "geo routing OFF (callback false) falls back to default URL" do
+      Application.put_env(:good_analytics, :geo_routing_enabled_fn, {AlwaysFalse, :enabled?})
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://default.example.com/landing",
+          geo_targeting: %{"DE" => "https://de.example.com/landing"}
+        })
+
+      result =
+        Redirect.handle_redirect(geo_conn("/#{link.key}", {1, 2, 3, 4}), "test.link", link.key)
+
+      uri = location_uri(result)
+      assert uri.host == "default.example.com"
+    end
+
+    test "no callback configured falls back to default URL" do
+      Application.delete_env(:good_analytics, :geo_routing_enabled_fn)
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://default.example.com/landing",
+          geo_targeting: %{"DE" => "https://de.example.com/landing"}
+        })
+
+      result =
+        Redirect.handle_redirect(geo_conn("/#{link.key}", {1, 2, 3, 4}), "test.link", link.key)
+
+      uri = location_uri(result)
+      assert uri.host == "default.example.com"
+    end
+
+    test "lowercase country code in geo lookup still matches uppercase stored key" do
+      Application.put_env(:good_analytics, :geo_routing_enabled_fn, {AlwaysTrue, :enabled?})
+
+      defmodule LowercaseProvider do
+        @behaviour GoodAnalytics.Geo.Provider
+        @impl true
+        def lookup({1, 2, 3, 4}),
+          do: {:ok, %{"country" => %{"iso_code" => "de", "names" => %{"en" => "Germany"}}}}
+
+        def lookup(_), do: {:error, :not_found}
+      end
+
+      Application.put_env(:good_analytics, :geo,
+        provider: LowercaseProvider,
+        normalizer: GoodAnalytics.Geo.Normalizer.MaxMind
+      )
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://default.example.com/landing",
+          geo_targeting: %{"DE" => "https://de.example.com/landing"}
+        })
+
+      result =
+        Redirect.handle_redirect(geo_conn("/#{link.key}", {1, 2, 3, 4}), "test.link", link.key)
+
+      uri = location_uri(result)
+      assert uri.host == "de.example.com"
+    end
+
+    test "stored URL that fails scheme/host check falls back and logs" do
+      Application.put_env(:good_analytics, :geo_routing_enabled_fn, {AlwaysTrue, :enabled?})
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://default.example.com/landing",
+          geo_targeting: %{"DE" => "https://de.example.com/landing"}
+        })
+
+      # Bypass the changeset to simulate stale or directly-edited data
+      GoodAnalytics.Repo.repo().query!(
+        "UPDATE good_analytics.ga_links SET geo_targeting = $1 WHERE id = $2",
+        [%{"DE" => "javascript:alert(1)"}, Ecto.UUID.dump!(link.id)]
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          result =
+            Redirect.handle_redirect(
+              geo_conn("/#{link.key}", {1, 2, 3, 4}),
+              "test.link",
+              link.key
+            )
+
+          uri = location_uri(result)
+          assert uri.host == "default.example.com"
+        end)
+
+      assert log =~ "geo_targeting URL failed scheme/host check"
+    end
+  end
 end

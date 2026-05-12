@@ -6,7 +6,7 @@ defmodule GoodAnalytics.Api.VisitorController do
 
   alias OpenApiSpex.Operation
 
-  plug OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true
+  plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
   @max_limit 200
 
@@ -18,11 +18,25 @@ defmodule GoodAnalytics.Api.VisitorController do
       summary: "List visitors",
       operationId: "listVisitors",
       parameters: [
-        Operation.parameter(:limit, :query, %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 20}, "Page size"),
-        Operation.parameter(:offset, :query, %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0}, "Offset")
+        Operation.parameter(
+          :limit,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 20},
+          "Page size"
+        ),
+        Operation.parameter(
+          :offset,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0},
+          "Offset"
+        )
       ],
       responses: %{
-        200 => Operation.response("Visitors list", "application/json", %OpenApiSpex.Schema{type: :array, items: Schemas.VisitorResponse})
+        200 =>
+          Operation.response("Visitors list", "application/json", %OpenApiSpex.Schema{
+            type: :array,
+            items: Schemas.VisitorResponse
+          })
       }
     }
   end
@@ -45,7 +59,9 @@ defmodule GoodAnalytics.Api.VisitorController do
       tags: ["Visitors"],
       summary: "Lookup visitor by external ID",
       operationId: "lookupVisitor",
-      parameters: [Operation.parameter(:external_id, :path, :string, "External person ID", required: true)],
+      parameters: [
+        Operation.parameter(:external_id, :path, :string, "External person ID", required: true)
+      ],
       responses: %{
         200 => Operation.response("Visitor", "application/json", Schemas.VisitorResponse),
         404 => Operation.response("Not found", "application/json", Schemas.ErrorResponse)
@@ -60,7 +76,11 @@ defmodule GoodAnalytics.Api.VisitorController do
       operationId: "getVisitorTimeline",
       parameters: [Operation.parameter(:id, :path, :string, "Visitor ID", required: true)],
       responses: %{
-        200 => Operation.response("Timeline events", "application/json", %OpenApiSpex.Schema{type: :array, items: Schemas.TimelineResponse}),
+        200 =>
+          Operation.response("Timeline events", "application/json", %OpenApiSpex.Schema{
+            type: :array,
+            items: Schemas.TimelineResponse
+          }),
         404 => Operation.response("Not found", "application/json", Schemas.ErrorResponse)
       }
     }
@@ -73,7 +93,8 @@ defmodule GoodAnalytics.Api.VisitorController do
       operationId: "getVisitorAttribution",
       parameters: [Operation.parameter(:id, :path, :string, "Visitor ID", required: true)],
       responses: %{
-        200 => Operation.response("Attribution data", "application/json", Schemas.AttributionResponse),
+        200 =>
+          Operation.response("Attribution data", "application/json", Schemas.AttributionResponse),
         404 => Operation.response("Not found", "application/json", Schemas.ErrorResponse)
       }
     }

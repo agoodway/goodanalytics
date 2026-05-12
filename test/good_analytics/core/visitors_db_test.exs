@@ -1,6 +1,7 @@
 defmodule GoodAnalytics.Core.VisitorsDBTest do
   use GoodAnalytics.DataCase, async: false
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias GoodAnalytics.Core.Visitors
 
   @workspace_id GoodAnalytics.default_workspace_id()
@@ -14,6 +15,79 @@ defmodule GoodAnalytics.Core.VisitorsDBTest do
 
     test "returns nil for nonexistent ID" do
       assert Visitors.get_visitor(Uniq.UUID.uuid7()) == nil
+    end
+  end
+
+  describe "maybe_set_geo/2" do
+    test "writes geo when current value is empty" do
+      visitor = create_visitor!()
+      assert visitor.geo == %{}
+
+      assert {:ok, 1} =
+               Visitors.maybe_set_geo(visitor.id, %{"country_code" => "US", "city" => "NYC"})
+
+      reloaded = Visitors.get_visitor(visitor.id)
+      assert reloaded.geo["country_code"] == "US"
+      assert reloaded.geo["city"] == "NYC"
+    end
+
+    test "does not overwrite when visitor already has geo (returns {:ok, 0})" do
+      visitor = create_visitor!(%{geo: %{"country_code" => "US"}})
+
+      assert {:ok, 0} = Visitors.maybe_set_geo(visitor.id, %{"country_code" => "GB"})
+
+      reloaded = Visitors.get_visitor(visitor.id)
+      assert reloaded.geo["country_code"] == "US"
+    end
+
+    test "noops when given empty geo" do
+      visitor = create_visitor!()
+      assert :noop = Visitors.maybe_set_geo(visitor.id, %{})
+    end
+
+    test "noops on non-map geo (defensive)" do
+      visitor = create_visitor!()
+      assert :noop = Visitors.maybe_set_geo(visitor.id, nil)
+    end
+
+    test "returns :not_found for unknown visitor" do
+      assert {:error, :not_found} =
+               Visitors.maybe_set_geo(Uniq.UUID.uuid7(), %{"country_code" => "US"})
+    end
+
+    test "concurrent writers do not both succeed (first-event-wins is atomic)" do
+      visitor = create_visitor!()
+      parent = self()
+
+      # Spawn two concurrent writers; the first to commit wins. Use the same
+      # repo connection ownership via Sandbox allow.
+      writer = fn label, geo ->
+        Sandbox.allow(GoodAnalytics.TestRepo, parent, self())
+        result = Visitors.maybe_set_geo(visitor.id, geo)
+        send(parent, {:done, label, result})
+      end
+
+      spawn(fn -> writer.(:a, %{"country_code" => "US"}) end)
+      spawn(fn -> writer.(:b, %{"country_code" => "GB"}) end)
+
+      results =
+        Enum.map(1..2, fn _ ->
+          receive do
+            {:done, label, result} -> {label, result}
+          after
+            1_000 -> :timeout
+          end
+        end)
+
+      # Exactly one writer should have written (got {:ok, 1}); the other got
+      # {:ok, 0}. The persisted geo matches whichever won.
+      winners = Enum.count(results, fn {_label, r} -> r == {:ok, 1} end)
+      losers = Enum.count(results, fn {_label, r} -> r == {:ok, 0} end)
+      assert winners == 1, "expected exactly one winner, got #{inspect(results)}"
+      assert losers == 1, "expected exactly one loser, got #{inspect(results)}"
+
+      reloaded = Visitors.get_visitor(visitor.id)
+      assert reloaded.geo["country_code"] in ["US", "GB"]
     end
   end
 

@@ -16,6 +16,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   """
 
   alias GoodAnalytics.Core.Events.Event
+  alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Hooks
   alias GoodAnalytics.Maps
@@ -143,6 +144,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
       last_click_id: signals[:click_id],
       click_id_params: signals[:click_id_params] || %{},
       attribution_path: if(signals[:source], do: [signals[:source]], else: []),
+      geo: signals[:geo] || %{},
       first_seen_at: now,
       last_seen_at: now
     }
@@ -158,7 +160,21 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   def update_visitor(visitor, signals) do
     repo = Repo.repo()
 
-    changes = %{
+    with {:ok, updated} <-
+           visitor
+           |> Visitor.changeset(signal_changes(visitor, signals))
+           |> repo.update(prefix: GoodAnalytics.schema_name()) do
+      # Geo write is intentionally separate from the changeset path so it can
+      # be atomic: `Visitors.maybe_set_geo/2` issues a conditional UPDATE that
+      # only succeeds when `geo` is still empty. This holds the first-event-
+      # wins contract under concurrent click + beacon writes for the same
+      # visitor. The visitor struct we return reflects the post-write state.
+      maybe_apply_geo(updated, signals[:geo])
+    end
+  end
+
+  defp signal_changes(visitor, signals) do
+    %{
       last_seen_at: DateTime.utc_now(),
       last_source: signals[:source] || visitor.last_source,
       last_click_id: signals[:click_id] || visitor.last_click_id,
@@ -170,11 +186,17 @@ defmodule GoodAnalytics.Core.IdentityResolver do
         Map.merge(visitor.click_id_params || %{}, signals[:click_id_params] || %{}),
       attribution_path: append_touchpoint(visitor.attribution_path, signals[:source])
     }
-
-    visitor
-    |> Visitor.changeset(changes)
-    |> repo.update(prefix: GoodAnalytics.schema_name())
   end
+
+  defp maybe_apply_geo(visitor, geo) when is_map(geo) and map_size(geo) > 0 do
+    case Visitors.maybe_set_geo(visitor.id, geo) do
+      {:ok, 1} -> {:ok, %{visitor | geo: geo}}
+      {:ok, 0} -> {:ok, visitor}
+      _ -> {:ok, visitor}
+    end
+  end
+
+  defp maybe_apply_geo(visitor, _no_geo), do: {:ok, visitor}
 
   @doc """
   Merges duplicate visitors into the primary (oldest) visitor.
@@ -193,6 +215,11 @@ defmodule GoodAnalytics.Core.IdentityResolver do
     multi =
       Ecto.Multi.new()
       |> Ecto.Multi.run(:merge_signals, fn _repo, _changes ->
+        # `pick_geo` runs once over the ORIGINAL set of visitors (not the
+        # accumulator) so first-seen-wins is deterministic regardless of
+        # reduction order or duplicate count.
+        merged_geo = pick_geo([primary | duplicates])
+
         merged =
           Enum.reduce(duplicates, primary, fn dup, acc ->
             %{
@@ -207,7 +234,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
             }
           end)
 
-        {:ok, merged}
+        {:ok, %{merged | geo: merged_geo}}
       end)
       |> Ecto.Multi.run(:update_primary, fn _repo, %{merge_signals: merged} ->
         update_visitor(merged, signals)
@@ -243,6 +270,21 @@ defmodule GoodAnalytics.Core.IdentityResolver do
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
+    end
+  end
+
+  # First-observation-wins for geo on merge: the non-empty geo belonging to the
+  # visitor with the earliest first_seen_at survives. Empty geos are skipped.
+  # Returns `%{}` if no visitor has geo data.
+  defp pick_geo(visitors) do
+    visitors
+    |> Enum.filter(fn v ->
+      is_map(v.geo) and map_size(v.geo) > 0
+    end)
+    |> Enum.sort_by(& &1.first_seen_at, DateTime)
+    |> case do
+      [%{geo: geo} | _] -> geo
+      [] -> %{}
     end
   end
 

@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.AttributionResponse do
+  @moduledoc """
+  Attribution details for a visitor.
+
+  Includes first-touch, last-touch, and full attribution path data with
+  first/last-seen timestamps.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

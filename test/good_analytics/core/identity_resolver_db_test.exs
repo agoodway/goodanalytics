@@ -7,6 +7,54 @@ defmodule GoodAnalytics.Core.IdentityResolverDBTest do
 
   @workspace_id GoodAnalytics.default_workspace_id()
 
+  describe "resolve/2 geo handling" do
+    test "first-event populates visitor.geo when current geo is empty" do
+      ga_id = "geo_first_#{System.unique_integer([:positive])}"
+
+      {:ok, visitor} =
+        IdentityResolver.resolve(
+          %{ga_id: ga_id, geo: %{"country_code" => "US", "city" => "Mountain View"}},
+          workspace_id: @workspace_id
+        )
+
+      assert visitor.geo["country_code"] == "US"
+      assert visitor.geo["city"] == "Mountain View"
+    end
+
+    test "subsequent event does NOT overwrite existing visitor.geo" do
+      ga_id = "geo_sticky_#{System.unique_integer([:positive])}"
+
+      {:ok, v1} =
+        IdentityResolver.resolve(
+          %{ga_id: ga_id, geo: %{"country_code" => "US"}},
+          workspace_id: @workspace_id
+        )
+
+      {:ok, v2} =
+        IdentityResolver.resolve(
+          %{ga_id: ga_id, geo: %{"country_code" => "GB"}},
+          workspace_id: @workspace_id
+        )
+
+      assert v2.id == v1.id
+      assert v2.geo["country_code"] == "US"
+    end
+
+    test "empty geo signal is ignored on existing visitor" do
+      ga_id = "geo_empty_sig_#{System.unique_integer([:positive])}"
+
+      {:ok, _v1} =
+        IdentityResolver.resolve(
+          %{ga_id: ga_id, geo: %{"country_code" => "US"}},
+          workspace_id: @workspace_id
+        )
+
+      {:ok, v2} = IdentityResolver.resolve(%{ga_id: ga_id, geo: %{}}, workspace_id: @workspace_id)
+
+      assert v2.geo["country_code"] == "US"
+    end
+  end
+
   describe "resolve/2" do
     test "creates new visitor when no candidates found" do
       assert {:ok, visitor} =
@@ -249,6 +297,57 @@ defmodule GoodAnalytics.Core.IdentityResolverDBTest do
       dup = Visitors.get_visitor(v2.id)
       assert dup.status == "merged"
       assert dup.merged_into_id == v1.id
+    end
+
+    test "geo follows earliest first_seen_at on merge (primary wins when oldest)" do
+      now = DateTime.utc_now()
+
+      {:ok, primary} = IdentityResolver.create_visitor(%{ga_id: "m_geo_p"}, @workspace_id)
+
+      {:ok, primary} =
+        primary
+        |> Ecto.Changeset.change(
+          first_seen_at: DateTime.add(now, -7, :day),
+          geo: %{"country_code" => "US"}
+        )
+        |> GoodAnalytics.TestRepo.update(prefix: GoodAnalytics.schema_name())
+
+      {:ok, dup} = IdentityResolver.create_visitor(%{ga_id: "m_geo_d"}, @workspace_id)
+
+      {:ok, dup} =
+        dup
+        |> Ecto.Changeset.change(
+          first_seen_at: now,
+          geo: %{"country_code" => "GB"}
+        )
+        |> GoodAnalytics.TestRepo.update(prefix: GoodAnalytics.schema_name())
+
+      {:ok, merged} = IdentityResolver.merge_visitors(primary, [dup], %{ga_id: "m_geo_p"})
+
+      assert merged.geo["country_code"] == "US"
+    end
+
+    test "geo adopts non-empty value when primary geo is empty" do
+      now = DateTime.utc_now()
+
+      {:ok, primary} = IdentityResolver.create_visitor(%{ga_id: "m_geo_e_p"}, @workspace_id)
+
+      {:ok, primary} =
+        primary
+        |> Ecto.Changeset.change(first_seen_at: DateTime.add(now, -7, :day))
+        |> GoodAnalytics.TestRepo.update(prefix: GoodAnalytics.schema_name())
+
+      {:ok, dup} = IdentityResolver.create_visitor(%{ga_id: "m_geo_e_d"}, @workspace_id)
+
+      {:ok, dup} =
+        dup
+        |> Ecto.Changeset.change(first_seen_at: now, geo: %{"country_code" => "GB"})
+        |> GoodAnalytics.TestRepo.update(prefix: GoodAnalytics.schema_name())
+
+      {:ok, merged} = IdentityResolver.merge_visitors(primary, [dup], %{ga_id: "m_geo_e_p"})
+
+      # Empty primary geo, single non-empty dup geo → dup's value survives.
+      assert merged.geo["country_code"] == "GB"
     end
   end
 

@@ -1,4 +1,7 @@
 defmodule GoodAnalytics.Api.Schemas.EventResponse do
+  @moduledoc """
+  Success response for a recorded event. Returns the persisted `event_id`.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

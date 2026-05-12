@@ -14,18 +14,18 @@ defmodule GoodAnalytics.ApiSpec.Router do
   use Phoenix.Router
 
   pipeline :api_spec do
-    plug :accepts, ["json", "html"]
+    plug(:accepts, ["json", "html"])
   end
 
   scope "/" do
-    pipe_through :api_spec
+    pipe_through(:api_spec)
 
-    get "/openapi", OpenApiSpex.Plug.RenderSpec, spec: GoodAnalytics.ApiSpec
+    get("/openapi", OpenApiSpex.Plug.RenderSpec, spec: GoodAnalytics.ApiSpec)
   end
 
   scope "/swaggerui" do
-    pipe_through :api_spec
+    pipe_through(:api_spec)
 
-    get "/", OpenApiSpex.Plug.SwaggerUI, path: "/api/docs/openapi"
+    get("/", OpenApiSpex.Plug.SwaggerUI, path: "/api/docs/openapi")
   end
 end

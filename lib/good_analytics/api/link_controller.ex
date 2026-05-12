@@ -6,7 +6,7 @@ defmodule GoodAnalytics.Api.LinkController do
 
   alias OpenApiSpex.Operation
 
-  plug OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true
+  plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
   @max_limit 200
 
@@ -17,7 +17,10 @@ defmodule GoodAnalytics.Api.LinkController do
       tags: ["Links"],
       summary: "Create a link",
       operationId: "createLink",
-      requestBody: Operation.request_body("Link parameters", "application/json", Schemas.LinkParams, required: true),
+      requestBody:
+        Operation.request_body("Link parameters", "application/json", Schemas.LinkParams,
+          required: true
+        ),
       responses: %{
         201 => Operation.response("Link created", "application/json", Schemas.LinkResponse),
         409 => Operation.response("Conflict", "application/json", Schemas.ErrorResponse),
@@ -32,11 +35,25 @@ defmodule GoodAnalytics.Api.LinkController do
       summary: "List links",
       operationId: "listLinks",
       parameters: [
-        Operation.parameter(:limit, :query, %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 50}, "Page size"),
-        Operation.parameter(:offset, :query, %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0}, "Offset")
+        Operation.parameter(
+          :limit,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 50},
+          "Page size"
+        ),
+        Operation.parameter(
+          :offset,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0},
+          "Offset"
+        )
       ],
       responses: %{
-        200 => Operation.response("Links list", "application/json", %OpenApiSpex.Schema{type: :array, items: Schemas.LinkResponse})
+        200 =>
+          Operation.response("Links list", "application/json", %OpenApiSpex.Schema{
+            type: :array,
+            items: Schemas.LinkResponse
+          })
       }
     }
   end
@@ -60,7 +77,12 @@ defmodule GoodAnalytics.Api.LinkController do
       summary: "Update a link",
       operationId: "updateLink",
       parameters: [Operation.parameter(:id, :path, :string, "Link ID", required: true)],
-      requestBody: Operation.request_body("Link attributes to update", "application/json", Schemas.LinkUpdateParams),
+      requestBody:
+        Operation.request_body(
+          "Link attributes to update",
+          "application/json",
+          Schemas.LinkUpdateParams
+        ),
       responses: %{
         200 => Operation.response("Updated link", "application/json", Schemas.LinkResponse),
         404 => Operation.response("Not found", "application/json", Schemas.ErrorResponse),
@@ -102,11 +124,25 @@ defmodule GoodAnalytics.Api.LinkController do
       operationId: "getLinkClicks",
       parameters: [
         Operation.parameter(:link_id, :path, :string, "Link ID", required: true),
-        Operation.parameter(:limit, :query, %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 50}, "Page size"),
-        Operation.parameter(:offset, :query, %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0}, "Offset")
+        Operation.parameter(
+          :limit,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 200, default: 50},
+          "Page size"
+        ),
+        Operation.parameter(
+          :offset,
+          :query,
+          %OpenApiSpex.Schema{type: :integer, minimum: 0, default: 0},
+          "Offset"
+        )
       ],
       responses: %{
-        200 => Operation.response("Click events", "application/json", %OpenApiSpex.Schema{type: :array, items: Schemas.ClickResponse}),
+        200 =>
+          Operation.response("Click events", "application/json", %OpenApiSpex.Schema{
+            type: :array,
+            items: Schemas.ClickResponse
+          }),
         404 => Operation.response("Not found", "application/json", Schemas.ErrorResponse)
       }
     }
@@ -126,7 +162,9 @@ defmodule GoodAnalytics.Api.LinkController do
         if has_unique_constraint_error?(errors) do
           conn |> put_status(409) |> json(%{error: "A link with this domain/key already exists"})
         else
-          conn |> put_status(422) |> json(%{error: "Validation failed", errors: format_errors(errors)})
+          conn
+          |> put_status(422)
+          |> json(%{error: "Validation failed", errors: format_errors(errors)})
         end
     end
   end
@@ -151,12 +189,21 @@ defmodule GoodAnalytics.Api.LinkController do
 
   def update(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
-    attrs = conn.body_params |> to_plain_map() |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()
+
+    attrs =
+      conn.body_params |> to_plain_map() |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()
 
     case Links.update_link(workspace_id, id, attrs) do
-      {:ok, link} -> json(conn, serialize_link(link))
-      {:error, :not_found} -> conn |> put_status(404) |> json(%{error: "Link not found"})
-      {:error, %Ecto.Changeset{errors: errors}} -> conn |> put_status(422) |> json(%{error: "Validation failed", errors: format_errors(errors)})
+      {:ok, link} ->
+        json(conn, serialize_link(link))
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "Link not found"})
+
+      {:error, %Ecto.Changeset{errors: errors}} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "Validation failed", errors: format_errors(errors)})
     end
   end
 
@@ -257,9 +304,11 @@ defmodule GoodAnalytics.Api.LinkController do
 
   defp format_errors(errors) do
     Map.new(errors, fn {field, {msg, opts}} ->
-      message = Enum.reduce(opts, msg, fn {key, value}, acc ->
-        String.replace(acc, "%{#{key}}", to_string(value))
-      end)
+      message =
+        Enum.reduce(opts, msg, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+
       {field, [message]}
     end)
   end

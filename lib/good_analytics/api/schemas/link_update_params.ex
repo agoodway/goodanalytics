@@ -1,4 +1,9 @@
 defmodule GoodAnalytics.Api.Schemas.LinkUpdateParams do
+  @moduledoc """
+  Request body for partially updating a tracked link.
+
+  All fields are optional and map to mutable link attributes.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

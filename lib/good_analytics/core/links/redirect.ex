@@ -11,12 +11,27 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   6. Build redirect URL with link UTMs, passthrough params, and ga_id
   7. Fire :link_click hook (sync, crash-isolated)
   8. 302 redirect
+
+  ## Geo routing callback
+
+  When `link.geo_targeting` is non-empty, the redirect path consults the
+  configured `:geo_routing_enabled_fn` callback to decide whether to apply
+  country-based routing. The callback shape is `{Module, :function}` and
+  must accept a `workspace_id :: Ecto.UUID.t()`.
+
+  Contract:
+    * **MUST** return a boolean.
+    * **MUST NOT** raise. A raise propagates and the redirect 500s — this
+      is host-app misconfiguration that should be fixed, not silently
+      swallowed. Cache lookups (e.g. via Nebulex) keep this hot.
   """
 
   alias GoodAnalytics.Core.Events.Recorder
   alias GoodAnalytics.Core.IdentityResolver
   alias GoodAnalytics.Core.Links
+  alias GoodAnalytics.Core.Links.Link
   alias GoodAnalytics.Core.Tracking.{Deduplication, SourceClassifier}
+  alias GoodAnalytics.Geo
   alias GoodAnalytics.Hooks
 
   import Plug.Conn
@@ -36,38 +51,25 @@ defmodule GoodAnalytics.Core.Links.Redirect do
       source = SourceClassifier.classify(conn)
       qr = conn.query_params["qr"] == "1"
 
-      # Identity resolution - if it fails, still redirect
-      visitor =
-        case IdentityResolver.resolve(
-               %{click_id: click_id, ga_id: ga_id, source: source},
-               workspace_id: link.workspace_id
-             ) do
-          {:ok, v} -> v
-          {:error, _} -> nil
-        end
+      geo_map = lookup_geo(conn.remote_ip)
+      signals = build_signals(click_id, ga_id, source, geo_map)
+      visitor = resolve_visitor(signals, link.workspace_id)
 
       record_click_if_unique(conn, link, visitor, click_id, source, qr)
 
-      final_destination = build_redirect_url(destination, link, conn, click_id)
+      final_destination = build_redirect_url(destination, link, conn, click_id, geo_map)
 
-      # Fire :link_click hook (sync, crash-isolated)
       hook_results =
-        try do
-          Hooks.notify_sync(
-            :link_click,
-            %{
-              link: link,
-              click_id: click_id,
-              source: source,
-              qr: qr
-            },
-            visitor
-          )
-        rescue
-          e ->
-            Logger.warning("GoodAnalytics: link_click hook error: #{inspect(e)}")
-            []
-        end
+        Hooks.notify_sync(
+          :link_click,
+          %{
+            link: link,
+            click_id: click_id,
+            source: source,
+            qr: qr
+          },
+          visitor
+        )
 
       conn
       |> apply_hook_cookies(hook_results)
@@ -87,6 +89,26 @@ defmodule GoodAnalytics.Core.Links.Redirect do
         conn
         |> put_status(400)
         |> Phoenix.Controller.text("Invalid destination URL")
+    end
+  end
+
+  defp lookup_geo(remote_ip) do
+    case Geo.lookup(remote_ip) do
+      {:ok, geo} -> geo
+      _ -> nil
+    end
+  end
+
+  defp build_signals(click_id, ga_id, source, nil),
+    do: %{click_id: click_id, ga_id: ga_id, source: source}
+
+  defp build_signals(click_id, ga_id, source, geo_map),
+    do: %{click_id: click_id, ga_id: ga_id, source: source, geo: geo_map}
+
+  defp resolve_visitor(signals, workspace_id) do
+    case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
+      {:ok, visitor} -> visitor
+      {:error, _} -> nil
     end
   end
 
@@ -113,13 +135,10 @@ defmodule GoodAnalytics.Core.Links.Redirect do
 
   defp validate_destination_url(link, conn) do
     base_url = select_destination(link, conn)
-    uri = URI.parse(base_url)
 
-    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" do
-      {:ok, base_url}
-    else
-      {:error, :invalid_destination}
-    end
+    if Link.valid_http_url?(base_url),
+      do: {:ok, base_url},
+      else: {:error, :invalid_destination}
   end
 
   defp select_destination(link, conn) do
@@ -147,8 +166,15 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   - Link UTMs override destination UTMs (marketer intent > default)
   - Request passthrough overrides link UTMs (per-click override > per-link default)
   - `ga_id` is always present
+
+  When `geo_map` is provided AND the workspace has geo routing enabled via the
+  host-app `:geo_routing_enabled_fn` callback AND `link.geo_targeting` maps the
+  resolved country code to a non-empty URL, that URL replaces the device-
+  targeted/default destination before params are merged.
   """
-  def build_redirect_url(base_url, link, conn, click_id) do
+  def build_redirect_url(base_url, link, conn, click_id, geo_map \\ nil) do
+    base_url = maybe_geo_route(base_url, link, geo_map)
+
     uri = URI.parse(base_url)
     existing_params = URI.decode_query(uri.query || "")
 
@@ -169,6 +195,60 @@ defmodule GoodAnalytics.Core.Links.Redirect do
       |> Map.put("ga_id", click_id)
 
     %{uri | query: URI.encode_query(params)} |> URI.to_string()
+  end
+
+  defp maybe_geo_route(base_url, _link, nil), do: base_url
+
+  defp maybe_geo_route(base_url, link, geo_map) do
+    if geo_routing_enabled?(link.workspace_id),
+      do: geo_routed_url(link, geo_map, base_url),
+      else: base_url
+  end
+
+  # Resolves a country-routed URL from `link.geo_targeting`. Keys are stored
+  # uppercase ISO-3166-1 alpha-2 (enforced by the link changeset); we upcase
+  # the resolved country code at lookup time so providers that emit lowercase
+  # still match. When a country-specific URL is available, it OVERRIDES any
+  # device-specific URL chosen by `select_destination/2` — a German visitor
+  # on iOS gets the German page, not the iOS page.
+  defp geo_routed_url(%{geo_targeting: targeting} = link, %{country_code: cc}, fallback)
+       when is_map(targeting) and is_binary(cc) and cc != "" do
+    targeting
+    |> Map.get(String.upcase(cc))
+    |> resolve_geo_target_url(link, cc, fallback)
+  end
+
+  defp geo_routed_url(_, _, fallback), do: fallback
+
+  # Defense-in-depth: the changeset already rejects non-HTTP(S) URLs, but a
+  # raw SQL write or stale data could still slip through. A bad URL falls
+  # back to the device/default destination and logs a single warning.
+  defp resolve_geo_target_url(url, link, cc, fallback) when is_binary(url) and url != "" do
+    if Link.valid_http_url?(url),
+      do: url,
+      else: log_invalid_geo_url(link, cc, fallback)
+  end
+
+  defp resolve_geo_target_url(_url, _link, _cc, fallback), do: fallback
+
+  defp log_invalid_geo_url(link, cc, fallback) do
+    Logger.warning(
+      "GoodAnalytics: geo_targeting URL failed scheme/host check; falling back. " <>
+        "link_id=#{inspect(link.id)} cc=#{cc}"
+    )
+
+    fallback
+  end
+
+  # Calls the host-app `:geo_routing_enabled_fn` callback. Defaults to `false`
+  # so links never silently start routing by country — operators must explicitly
+  # opt in. Callback contract is documented in the @moduledoc; it MUST return
+  # a boolean and MUST NOT raise.
+  defp geo_routing_enabled?(workspace_id) do
+    case Application.get_env(:good_analytics, :geo_routing_enabled_fn) do
+      {mod, fun} -> apply(mod, fun, [workspace_id]) == true
+      _ -> false
+    end
   end
 
   @excluded_passthrough_params MapSet.new(~w(

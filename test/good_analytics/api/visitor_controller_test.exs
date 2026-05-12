@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Api.VisitorControllerTest do
   use GoodAnalytics.DataCase, async: false
 
+  alias GoodAnalytics.Api.Router
+
   @workspace_id GoodAnalytics.default_workspace_id()
 
   setup do
@@ -16,7 +18,7 @@ defmodule GoodAnalytics.Api.VisitorControllerTest do
     conn = Plug.Test.conn(method, path)
     conn = Plug.Conn.put_req_header(conn, "content-type", "application/json")
     conn = Plug.Conn.put_req_header(conn, "authorization", "Bearer test-token")
-    GoodAnalytics.Api.Router.call(conn, GoodAnalytics.Api.Router.init([]))
+    Router.call(conn, Router.init([]))
   end
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
@@ -113,11 +115,12 @@ defmodule GoodAnalytics.Api.VisitorControllerTest do
 
   describe "GET /visitors/:id/attribution" do
     test "returns attribution data for visitor" do
-      visitor = create_visitor!(%{
-        attribution_path: [%{"source" => "google", "medium" => "cpc"}],
-        first_source: %{"platform" => "google"},
-        last_source: %{"platform" => "direct"}
-      })
+      visitor =
+        create_visitor!(%{
+          attribution_path: [%{"source" => "google", "medium" => "cpc"}],
+          first_source: %{"platform" => "google"},
+          last_source: %{"platform" => "direct"}
+        })
 
       conn = api_conn(:get, "/visitors/#{visitor.id}/attribution")
 

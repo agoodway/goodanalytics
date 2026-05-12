@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.ErrorResponse do
+  @moduledoc """
+  Standard API error response body.
+
+  Includes a top-level error message and optional field-level validation
+  errors.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

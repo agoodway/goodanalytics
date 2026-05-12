@@ -1,4 +1,9 @@
 defmodule GoodAnalytics.Api.Schemas.PaginationParams do
+  @moduledoc """
+  Shared pagination query parameters.
+
+  Defines `limit` and `offset` bounds used by list endpoints.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

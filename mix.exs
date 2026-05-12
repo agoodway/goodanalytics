@@ -91,6 +91,10 @@ defmodule GoodAnalytics.MixProject do
       # User agent parsing
       {:ua_inspector, "~> 3.0"},
 
+      # GeoIP enrichment (optional; only loaded when host app declares :locus
+      # and configures `:good_analytics, :geo`). See README for setup.
+      {:locus, "~> 2.3", optional: true},
+
       # QR code generation
       {:qr_code, "~> 3.2"},
 

@@ -4,6 +4,14 @@ defmodule GoodAnalytics.Core.Links.Link do
 
   Each link maps a `domain/key` pair to a destination URL.
   Archived links free up their key for reuse.
+
+  ## geo_targeting
+
+  `geo_targeting` is a `%{country_code => url}` map. Keys are normalized
+  to uppercase ISO-3166-1 alpha-2 codes on write. Values are validated as
+  HTTP/HTTPS URLs by the changeset; any other scheme (e.g. `javascript:`)
+  is rejected. Lookups at redirect time match against the uppercase form
+  of the resolved country code.
   """
 
   use Ecto.Schema
@@ -103,6 +111,7 @@ defmodule GoodAnalytics.Core.Links.Link do
     |> validate_url(:url)
     |> validate_url(:ios_url)
     |> validate_url(:android_url)
+    |> validate_and_normalize_geo_targeting()
     |> unique_constraint([:domain, :key], name: :idx_ga_links_domain_key)
   end
 
@@ -113,15 +122,61 @@ defmodule GoodAnalytics.Core.Links.Link do
     |> cast(attrs, @counter_fields)
   end
 
+  @doc """
+  Returns true when `url` is a non-empty string with an `http` or `https`
+  scheme and a non-empty host. Public so the redirect path can apply the
+  same check at read time as a defense-in-depth against data that bypassed
+  the changeset.
+  """
+  @spec valid_http_url?(term()) :: boolean()
+  def valid_http_url?(url) when is_binary(url) and url != "" do
+    uri = URI.parse(url)
+    uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != ""
+  end
+
+  def valid_http_url?(_), do: false
+
   defp validate_url(changeset, field) do
     validate_change(changeset, field, fn _, value ->
-      uri = URI.parse(value)
-
-      if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" do
-        []
-      else
-        [{field, "must be a valid HTTP or HTTPS URL"}]
-      end
+      if valid_http_url?(value),
+        do: [],
+        else: [{field, "must be a valid HTTP or HTTPS URL"}]
     end)
   end
+
+  defp validate_and_normalize_geo_targeting(changeset) do
+    case fetch_change(changeset, :geo_targeting) do
+      {:ok, value} -> apply_geo_targeting(changeset, value)
+      :error -> changeset
+    end
+  end
+
+  defp apply_geo_targeting(changeset, nil), do: put_change(changeset, :geo_targeting, %{})
+
+  defp apply_geo_targeting(changeset, targeting) when is_map(targeting) do
+    normalized = normalize_geo_targeting(targeting)
+
+    if all_valid_geo_targets?(normalized) do
+      put_change(changeset, :geo_targeting, normalized)
+    else
+      add_error(changeset, :geo_targeting, "all values must be valid HTTP or HTTPS URLs")
+    end
+  end
+
+  defp apply_geo_targeting(changeset, _other) do
+    add_error(changeset, :geo_targeting, "must be a map of country code to URL")
+  end
+
+  defp normalize_geo_targeting(targeting) do
+    Map.new(targeting, fn {k, v} -> {normalize_cc(k), v} end)
+  end
+
+  defp all_valid_geo_targets?(targeting) do
+    Enum.all?(targeting, fn {cc, url} ->
+      is_binary(cc) and cc != "" and valid_http_url?(url)
+    end)
+  end
+
+  defp normalize_cc(cc) when is_binary(cc), do: String.upcase(cc)
+  defp normalize_cc(other), do: other
 end

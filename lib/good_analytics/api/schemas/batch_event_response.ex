@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.BatchEventResponse do
+  @moduledoc """
+  Per-event results from a batch event submission.
+
+  Each result includes the original event index, status, and either an
+  `event_id` or an error message.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

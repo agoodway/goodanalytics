@@ -5,10 +5,11 @@ defmodule GoodAnalytics.Api.EventController do
   alias GoodAnalytics.Core.Events
   alias GoodAnalytics.Core.Events.Recorder
   alias GoodAnalytics.Core.Visitors
+  alias GoodAnalytics.Geo
 
   alias OpenApiSpex.Operation
 
-  plug OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true
+  plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
   @max_properties_keys 50
 
@@ -18,11 +19,16 @@ defmodule GoodAnalytics.Api.EventController do
     %Operation{
       tags: ["Events"],
       summary: "Record a single event",
-      description: "Record a server-side event for a visitor identified by visitor_id or person_external_id.",
+      description:
+        "Record a server-side event for a visitor identified by visitor_id or person_external_id.",
       operationId: "createEvent",
-      requestBody: Operation.request_body("Event parameters", "application/json", Schemas.EventParams, required: true),
+      requestBody:
+        Operation.request_body("Event parameters", "application/json", Schemas.EventParams,
+          required: true
+        ),
       responses: %{
-        200 => Operation.response("Idempotent duplicate", "application/json", Schemas.EventResponse),
+        200 =>
+          Operation.response("Idempotent duplicate", "application/json", Schemas.EventResponse),
         201 => Operation.response("Event recorded", "application/json", Schemas.EventResponse),
         404 => Operation.response("Visitor not found", "application/json", Schemas.ErrorResponse),
         422 => Operation.response("Validation error", "application/json", Schemas.ErrorResponse)
@@ -36,11 +42,24 @@ defmodule GoodAnalytics.Api.EventController do
       summary: "Record multiple events",
       description: "Record up to 100 events in a single request. Returns per-event results.",
       operationId: "batchEvents",
-      requestBody: Operation.request_body("Batch event parameters", "application/json", Schemas.BatchEventParams, required: true),
+      requestBody:
+        Operation.request_body(
+          "Batch event parameters",
+          "application/json",
+          Schemas.BatchEventParams,
+          required: true
+        ),
       responses: %{
-        201 => Operation.response("All events recorded", "application/json", Schemas.BatchEventResponse),
-        207 => Operation.response("Partial success", "application/json", Schemas.BatchEventResponse),
-        422 => Operation.response("Invalid batch envelope", "application/json", Schemas.ErrorResponse)
+        201 =>
+          Operation.response(
+            "All events recorded",
+            "application/json",
+            Schemas.BatchEventResponse
+          ),
+        207 =>
+          Operation.response("Partial success", "application/json", Schemas.BatchEventResponse),
+        422 =>
+          Operation.response("Invalid batch envelope", "application/json", Schemas.ErrorResponse)
       }
     }
   end
@@ -54,6 +73,8 @@ defmodule GoodAnalytics.Api.EventController do
     with :ok <- validate_properties_count(body),
          {:ok, visitor} <- resolve_visitor(workspace_id, body),
          {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, body) do
+      Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
+
       conn
       |> put_status(status)
       |> json(%{event_id: event.id})
@@ -67,18 +88,22 @@ defmodule GoodAnalytics.Api.EventController do
     workspace_id = conn.assigns.workspace_id
     %{events: events} = to_plain_map(conn.body_params)
 
-    results =
+    remote_ip = conn.remote_ip
+
+    {results, visitor_ids} =
       events
       |> Enum.with_index()
-      |> Enum.map(fn {event_params, index} ->
+      |> Enum.map_reduce(MapSet.new(), fn {event_params, index}, acc ->
         case process_single_event(workspace_id, event_params) do
-          {:ok, _status, event} ->
-            %{index: index, status: "ok", event_id: event.id}
+          {:ok, _status, event, visitor_id} ->
+            {%{index: index, status: "ok", event_id: event.id}, MapSet.put(acc, visitor_id)}
 
           {:error, status, message} when status in [404, 422] ->
-            %{index: index, status: "error", error: message}
+            {%{index: index, status: "error", error: message}, acc}
         end
       end)
+
+    Enum.each(visitor_ids, &Geo.enqueue_enrichment(&1, remote_ip))
 
     all_ok? = Enum.all?(results, &(&1.status == "ok"))
     status = if all_ok?, do: 201, else: 207
@@ -96,7 +121,7 @@ defmodule GoodAnalytics.Api.EventController do
     with :ok <- validate_properties_count(params),
          {:ok, visitor} <- resolve_visitor(workspace_id, params),
          {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, params) do
-      {:ok, status, event}
+      {:ok, status, event, visitor.id}
     end
   end
 
@@ -113,7 +138,8 @@ defmodule GoodAnalytics.Api.EventController do
     end
   end
 
-  defp resolve_visitor(workspace_id, %{person_external_id: external_id}) when is_binary(external_id) do
+  defp resolve_visitor(workspace_id, %{person_external_id: external_id})
+       when is_binary(external_id) do
     case Visitors.get_by_external_id(workspace_id, external_id) do
       nil -> {:error, 404, "Visitor not found"}
       visitor -> {:ok, visitor}

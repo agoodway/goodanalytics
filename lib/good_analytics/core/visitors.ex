@@ -103,6 +103,48 @@ defmodule GoodAnalytics.Core.Visitors do
   end
 
   @doc """
+  Populates `visitor.geo` for `visitor_id` if and only if the current value is
+  empty. Used by async ingest enrichment (beacon, REST API) where we want
+  first-event-wins semantics without re-running identity resolution.
+
+  Implemented as a conditional `UPDATE` (`SET geo = ? WHERE id = ? AND
+  (geo = '{}'::jsonb OR geo IS NULL)`) so the first-event-wins invariant
+  holds under concurrent click + beacon writes for the same visitor.
+
+  Returns `{:ok, count}` where `count` is `1` when the row was updated and
+  `0` when another writer beat us to it, `:noop` when called with empty
+  input, or `{:error, :not_found}` when the visitor does not exist.
+  """
+  @spec maybe_set_geo(Ecto.UUID.t(), map()) ::
+          {:ok, 0 | 1} | :noop | {:error, :not_found}
+  def maybe_set_geo(_visitor_id, geo) when not is_map(geo) or map_size(geo) == 0, do: :noop
+
+  def maybe_set_geo(visitor_id, geo) when is_map(geo) do
+    repo = Repo.repo()
+
+    # Atomic compare-and-set: only write when the column is still empty.
+    # Returns the number of rows updated (0 or 1). A 0 means another writer
+    # already populated the geo — that's the first-event-wins guarantee.
+    query =
+      from(v in Visitor,
+        where: v.id == ^visitor_id,
+        where: fragment("? = '{}'::jsonb OR ? IS NULL", v.geo, v.geo)
+      )
+
+    case repo.update_all(query, [set: [geo: geo, updated_at: DateTime.utc_now()]],
+           prefix: GoodAnalytics.schema_name()
+         ) do
+      {1, _} ->
+        {:ok, 1}
+
+      {0, _} ->
+        # Either the visitor doesn't exist or already has geo. Distinguish
+        # so callers can log unknown-visitor cases.
+        if get_visitor(visitor_id), do: {:ok, 0}, else: {:error, :not_found}
+    end
+  end
+
+  @doc """
   Removes all PII, events, and identity signals for a visitor (GDPR forget).
 
   Clears all identifying fields and deletes associated events.

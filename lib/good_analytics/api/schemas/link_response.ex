@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.LinkResponse do
+  @moduledoc """
+  Full tracked-link resource returned by the API.
+
+  Includes link configuration, aggregate performance metrics, and
+  timestamps.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{

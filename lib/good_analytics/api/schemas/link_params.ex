@@ -1,4 +1,10 @@
 defmodule GoodAnalytics.Api.Schemas.LinkParams do
+  @moduledoc """
+  Request body for creating a tracked link.
+
+  Defines required link identity (`domain`, `key`, `url`) plus optional
+  UTM, targeting, preview, and metadata fields.
+  """
   require OpenApiSpex
 
   OpenApiSpex.schema(%{
@@ -10,7 +16,11 @@ defmodule GoodAnalytics.Api.Schemas.LinkParams do
       domain: %OpenApiSpex.Schema{type: :string},
       key: %OpenApiSpex.Schema{type: :string},
       url: %OpenApiSpex.Schema{type: :string, format: :uri},
-      link_type: %OpenApiSpex.Schema{type: :string, enum: ~w(short referral campaign), default: "short"},
+      link_type: %OpenApiSpex.Schema{
+        type: :string,
+        enum: ~w(short referral campaign),
+        default: "short"
+      },
       utm_source: %OpenApiSpex.Schema{type: :string},
       utm_medium: %OpenApiSpex.Schema{type: :string},
       utm_campaign: %OpenApiSpex.Schema{type: :string},
