@@ -9,9 +9,22 @@
  */
 var ThumbmarkModule = {
   init: function(ga) {
-    var scriptPath = ga.config.endpoint.replace(/\/[^\/]*$/, '') + '/../ga/js/vendor/thumbmark.umd.js';
-    // Use the same base path as the GA script
-    scriptPath = '/ga/js/vendor/thumbmark.umd.js';
+    // Derive vendor URL from this script's own origin so it works cross-origin.
+    // Falls back to same-origin path for embedded Phoenix host-app integrations.
+    var scriptPath;
+    var scripts = document.getElementsByTagName('script');
+    var currentSrc = '';
+    for (var i = 0; i < scripts.length; i++) {
+      if (scripts[i].src && scripts[i].src.indexOf('/ga/js/thumbmark') !== -1) {
+        currentSrc = scripts[i].src;
+        break;
+      }
+    }
+    if (currentSrc) {
+      scriptPath = currentSrc.replace(/\/[^\/]*$/, '/vendor/thumbmark.umd.js');
+    } else {
+      scriptPath = '/ga/js/vendor/thumbmark.umd.js';
+    }
 
     var script = document.createElement('script');
     script.src = scriptPath;
