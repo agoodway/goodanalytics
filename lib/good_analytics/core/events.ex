@@ -56,6 +56,22 @@ defmodule GoodAnalytics.Core.Events do
     |> repo.one(prefix: GoodAnalytics.schema_name())
   end
 
+  @doc """
+  Finds an event by idempotency key within a workspace.
+
+  Returns `nil` if no event matches the key.
+  """
+  def get_by_idempotency_key(workspace_id, idempotency_key) do
+    repo = Repo.repo()
+
+    from(e in Event,
+      where: e.workspace_id == ^workspace_id,
+      where: fragment("?->>'_idempotency_key' = ?", e.properties, ^idempotency_key),
+      limit: 1
+    )
+    |> repo.one(prefix: GoodAnalytics.schema_name())
+  end
+
   @doc "Gets the most recent event of a given type for a visitor."
   def last_event(visitor_id, event_type) do
     repo = Repo.repo()

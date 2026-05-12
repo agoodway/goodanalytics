@@ -13,12 +13,14 @@ defmodule GoodAnalytics.Core.Visitors do
   def list_visitors(workspace_id, opts \\ []) do
     repo = Repo.repo()
     limit = Keyword.get(opts, :limit, 20)
+    offset = Keyword.get(opts, :offset, 0)
 
     from(v in Visitor,
       where: v.workspace_id == ^workspace_id,
       where: v.status != "merged",
       order_by: [desc: v.inserted_at],
-      limit: ^limit
+      limit: ^limit,
+      offset: ^offset
     )
     |> repo.all(prefix: GoodAnalytics.schema_name())
   end
@@ -26,6 +28,17 @@ defmodule GoodAnalytics.Core.Visitors do
   @doc "Gets a visitor by ID."
   def get_visitor(id) do
     Repo.repo().get(Visitor, id, prefix: GoodAnalytics.schema_name())
+  end
+
+  @doc "Gets a visitor by ID, scoped to a workspace."
+  def get_visitor(workspace_id, id) do
+    repo = Repo.repo()
+
+    from(v in Visitor,
+      where: v.id == ^id,
+      where: v.workspace_id == ^workspace_id
+    )
+    |> repo.one(prefix: GoodAnalytics.schema_name())
   end
 
   @doc "Gets a visitor by host-app external ID within a workspace."

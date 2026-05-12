@@ -77,6 +77,7 @@ config :good_analytics,
 | `:dispatch_policy` | No | — | `{Module, :function}` tuple for dispatch gating |
 | `:auto_create_partitions` | No | `true` | Whether to auto-create time partitions |
 | `:links` | No | `[]` | Link configuration, e.g. `[domains: ["mybrand.link"]]` |
+| `:api_authenticate` | No | — | Auth callback for REST API (`{Module, :function}` or fn/2) |
 
 **Cache configuration** (optional):
 
@@ -158,7 +159,45 @@ end
 
 **Important:** Place the short link catch-all routes (`/:key`) last in your router to avoid intercepting other routes.
 
-### 5. Serve the JavaScript Client
+### 5. Mount the REST API (Optional)
+
+GoodAnalytics includes a server-side REST API for event tracking, link management, and visitor queries. To enable it, configure an authentication callback and mount the API router.
+
+**Configure authentication:**
+
+```elixir
+# config/config.exs
+config :good_analytics, :api_authenticate, {MyApp.Auth, :authenticate_ga_api}
+```
+
+The callback receives `(token, type)` where `type` is `:bearer` or `:api_key`, and must return `{:ok, %{workspace_id: uuid}}` on success or `{:error, reason}` on failure:
+
+```elixir
+# lib/my_app/auth.ex
+defmodule MyApp.Auth do
+  def authenticate_ga_api(token, _type) do
+    case MyApp.ApiKeys.verify(token) do
+      {:ok, api_key} -> {:ok, %{workspace_id: api_key.workspace_id}}
+      :error -> {:error, :unauthorized}
+    end
+  end
+end
+```
+
+**Mount the router:**
+
+```elixir
+# lib/my_app_web/router.ex
+forward "/ga/api", GoodAnalytics.Api.Router
+```
+
+**Serve the OpenAPI spec and Swagger UI** (optional):
+
+```elixir
+forward "/api/docs", GoodAnalytics.ApiSpec.Router
+```
+
+### 6. Serve the JavaScript Client
 
 Configure your endpoint to serve the JS tracking client:
 
@@ -293,6 +332,103 @@ GoodAnalytics.archive_link(link_id)
 
 Recorded events broadcast `{:event_recorded, event}` on:
 - `"good_analytics:events:#{workspace_id}"` — workspace-scoped
+
+### REST API
+
+The REST API provides server-side access to events, links, and visitors. All requests require a `Bearer` token or `X-Api-Key` header. The workspace is derived from the auth callback response — it never appears in the URL.
+
+#### Events
+
+```bash
+# Record a single event
+curl -X POST /ga/api/events \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"visitor_id": "uuid", "event_type": "sale", "amount_cents": 4999, "currency": "USD"}'
+# => 201 {"event_id": "uuid"}
+
+# Idempotent submission (returns 200 if key already used)
+curl -X POST /ga/api/events \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"visitor_id": "uuid", "event_type": "sale", "idempotency_key": "order-123"}'
+
+# Batch events (up to 100, partial success returns 207)
+curl -X POST /ga/api/events/batch \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"events": [
+    {"visitor_id": "uuid-1", "event_type": "sale", "amount_cents": 100},
+    {"person_external_id": "cust_123", "event_type": "lead"}
+  ]}'
+# => 201 {"results": [{"index": 0, "status": "ok", "event_id": "..."}, ...]}
+```
+
+Visitor resolution: pass `visitor_id` (UUID, direct lookup) or `person_external_id` (resolved via workspace). If both are provided, `visitor_id` takes precedence. Returns 404 if the visitor is not found — server-side events never create visitors implicitly.
+
+#### Links
+
+```bash
+# Create a link
+curl -X POST /ga/api/links \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"domain": "mybrand.link", "key": "promo", "url": "https://example.com/sale"}'
+# => 201 {"id": "uuid", "domain": "mybrand.link", ...}
+
+# List links (paginated)
+curl /ga/api/links?limit=10&offset=0 -H "Authorization: Bearer $TOKEN"
+
+# Get / Update / Archive a link
+curl /ga/api/links/:id -H "Authorization: Bearer $TOKEN"
+curl -X PATCH /ga/api/links/:id -d '{"url": "https://new.com"}' ...
+curl -X DELETE /ga/api/links/:id ...   # => 204 (soft delete)
+
+# Link analytics
+curl /ga/api/links/:id/stats ...
+# => {"total_clicks": 42, "unique_clicks": 38, "total_leads": 5, "total_sales": 2, "total_revenue_cents": 9800}
+
+curl /ga/api/links/:id/clicks?limit=20 ...
+```
+
+#### Visitors
+
+```bash
+# List visitors (excludes merged, paginated)
+curl /ga/api/visitors?limit=20&offset=0 -H "Authorization: Bearer $TOKEN"
+
+# Get by ID or external ID
+curl /ga/api/visitors/:id ...
+curl /ga/api/visitors/by-external-id/cust_123 ...
+
+# Timeline and attribution
+curl /ga/api/visitors/:id/timeline ...
+curl /ga/api/visitors/:id/attribution ...
+# => {"attribution_path": [...], "first_source": {...}, "last_source": {...}, ...}
+```
+
+#### Authentication
+
+| Header | Type | Example |
+|--------|------|---------|
+| `Authorization` | Bearer token | `Authorization: Bearer sk_live_abc123` |
+| `X-Api-Key` | API key | `X-Api-Key: gak_abc123` |
+
+If both headers are present, Bearer takes precedence. Error responses:
+
+| Status | Condition |
+|--------|-----------|
+| 401 | Missing/invalid credentials, or `{:error, :unauthorized}` from callback |
+| 403 | `{:error, :forbidden}` from callback |
+| 503 | `:api_authenticate` config not set |
+
+#### Configuration Reference
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `:api_authenticate` | Yes | `{Module, :function}` tuple or `fn token, type -> result end` |
+
+The callback receives `(token, type)` where `type` is `:bearer` or `:api_key`. Must return `{:ok, %{workspace_id: uuid, ...}}` or `{:error, reason}`.
 
 ### Visitors
 

@@ -117,6 +117,9 @@ defmodule GoodAnalytics do
   def list_links(workspace_id, opts \\ []),
     do: Links.list_links(workspace_id, opts)
 
+  @doc "Update a link."
+  def update_link(id, attrs), do: Links.update_link(id, attrs)
+
   @doc "Archive a link."
   def archive_link(id), do: Links.archive_link(id)
 

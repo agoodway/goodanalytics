@@ -171,13 +171,64 @@ defmodule GoodAnalytics.Core.Links do
   def link_clicks(link_id, opts \\ []) do
     repo = Repo.repo()
     limit = Keyword.get(opts, :limit, @default_list_limit)
+    offset = Keyword.get(opts, :offset, 0)
 
     from(e in Event,
       where: e.link_id == ^link_id,
       where: e.event_type == "link_click",
       order_by: [desc: e.inserted_at],
-      limit: ^limit
+      limit: ^limit,
+      offset: ^offset
     )
     |> repo.all(prefix: GoodAnalytics.schema_name())
+  end
+
+  # ── Workspace-scoped variants (for API layer) ──
+
+  @doc "Gets a link by ID, scoped to a workspace."
+  def get_link(workspace_id, id) do
+    repo = Repo.repo()
+
+    from(l in Link,
+      where: l.id == ^id,
+      where: l.workspace_id == ^workspace_id
+    )
+    |> repo.one(prefix: GoodAnalytics.schema_name())
+  end
+
+  @doc "Updates a link, scoped to a workspace."
+  def update_link(workspace_id, id, attrs) do
+    repo = Repo.repo()
+
+    case get_link(workspace_id, id) do
+      nil -> {:error, :not_found}
+      link -> link |> Link.changeset(attrs) |> repo.update(prefix: GoodAnalytics.schema_name())
+    end
+  end
+
+  @doc "Archives a link, scoped to a workspace."
+  def archive_link(workspace_id, id) do
+    repo = Repo.repo()
+
+    case get_link(workspace_id, id) do
+      nil ->
+        {:error, :not_found}
+
+      link ->
+        link
+        |> Link.changeset(%{archived_at: DateTime.utc_now()})
+        |> repo.update(prefix: GoodAnalytics.schema_name())
+    end
+  end
+
+  @doc "Gets click events for a link, scoped to a workspace."
+  def link_clicks(workspace_id, id, opts) do
+    case get_link(workspace_id, id) do
+      nil ->
+        {:error, :not_found}
+
+      _link ->
+        link_clicks(id, opts)
+    end
   end
 end
