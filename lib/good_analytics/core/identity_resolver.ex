@@ -408,7 +408,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
     end
   end
 
-  @identify_keys ~w(person_external_id person_email person_name person_metadata)
+  @identify_keys ~w(person_external_id person_email person_phone person_name person_metadata)
 
   defp apply_identify(repo, visitor, person_attrs) do
     now = DateTime.utc_now()

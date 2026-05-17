@@ -14,6 +14,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
 
   alias GoodAnalytics.Connectors.{PostCommit, Signals}
   alias GoodAnalytics.Core.Events.Event
+  alias GoodAnalytics.Core.Events.UrlNormalizer
   alias GoodAnalytics.Hooks
   alias GoodAnalytics.Maps
   alias GoodAnalytics.PubSub
@@ -52,13 +53,18 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         )
       end
 
+    raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
+
     event_attrs =
       attrs
-      |> Map.drop([:connector_signals])
+      |> Map.drop([:connector_signals, "url"])
       |> Map.merge(%{
         workspace_id: visitor.workspace_id,
         visitor_id: visitor.id,
         event_type: event_type,
+        url: raw_url,
+        host: UrlNormalizer.host(raw_url),
+        path: UrlNormalizer.path(raw_url),
         source_platform: get_in_source(attrs, :platform),
         source_medium: get_in_source(attrs, :medium),
         source_campaign: get_in_source(attrs, :campaign),

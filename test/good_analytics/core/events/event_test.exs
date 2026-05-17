@@ -32,9 +32,21 @@ defmodule GoodAnalytics.Core.Events.EventTest do
     end
 
     test "accepts all valid event types" do
-      for type <- ~w(link_click pageview session_start identify lead sale share engagement custom) do
+      for type <- Event.event_types() do
         changeset = Event.changeset(%Event{}, %{@valid_attrs | event_type: type})
         assert changeset.valid?, "expected #{type} to be valid"
+      end
+    end
+
+    test "ingest_types excludes api_request" do
+      refute "api_request" in Event.ingest_types()
+      assert "pageview" in Event.ingest_types()
+      assert "custom" in Event.ingest_types()
+    end
+
+    test "ingest_types is a subset of event_types" do
+      for type <- Event.ingest_types() do
+        assert type in Event.event_types()
       end
     end
 

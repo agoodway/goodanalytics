@@ -4,6 +4,7 @@ defmodule GoodAnalytics.Api.EventController do
   alias GoodAnalytics.Api.Schemas
   alias GoodAnalytics.Core.Events
   alias GoodAnalytics.Core.Events.Recorder
+  alias GoodAnalytics.Core.IdentityResolver
   alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Geo
 
@@ -20,7 +21,7 @@ defmodule GoodAnalytics.Api.EventController do
       tags: ["Events"],
       summary: "Record a single event",
       description:
-        "Record a server-side event for a visitor identified by visitor_id or person_external_id.",
+        "Record a server-side event. Visitor resolution priority: visitor_id > person_external_id > ga_id > anonymous_id.",
       operationId: "createEvent",
       requestBody:
         Operation.request_body("Event parameters", "application/json", Schemas.EventParams,
@@ -146,8 +147,55 @@ defmodule GoodAnalytics.Api.EventController do
     end
   end
 
-  defp resolve_visitor(_workspace_id, _params) do
-    {:error, 422, "Either visitor_id or person_external_id is required"}
+  defp resolve_visitor(workspace_id, params) do
+    with nil <- try_signals(workspace_id, params) do
+      if has_any_identifier?(params) do
+        {:error, 404, "Visitor not found"}
+      else
+        {:error, 422, "One of visitor_id, person_external_id, ga_id, or anonymous_id is required"}
+      end
+    end
+  end
+
+  defp try_signals(workspace_id, params) do
+    signals = %{
+      ga_id: Map.get(params, :ga_id),
+      anonymous_id: Map.get(params, :anonymous_id)
+    }
+
+    if signals.ga_id || signals.anonymous_id do
+      case IdentityResolver.find_candidates(signals, workspace_id) do
+        [visitor | _] -> maybe_identify(visitor, params)
+        [] -> nil
+      end
+    end
+  end
+
+  defp maybe_identify(visitor, params) do
+    person_attrs =
+      params
+      |> Map.take([
+        :person_external_id,
+        :person_email,
+        :person_phone,
+        :person_name,
+        :person_metadata
+      ])
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    if map_size(person_attrs) > 0 do
+      case IdentityResolver.identify(visitor, person_attrs) do
+        {:ok, visitor} -> {:ok, visitor}
+        _other -> {:error, 422, "Invalid identity attributes"}
+      end
+    else
+      {:ok, visitor}
+    end
+  end
+
+  defp has_any_identifier?(params) do
+    Enum.any?([:person_external_id, :ga_id, :anonymous_id], &Map.get(params, &1))
   end
 
   defp maybe_idempotent_record(workspace_id, visitor, params) do

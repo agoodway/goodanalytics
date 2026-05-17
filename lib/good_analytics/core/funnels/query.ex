@@ -25,7 +25,13 @@ defmodule GoodAnalytics.Core.Funnels.Query do
     cohort_filter = Keyword.get(opts, :cohort_source_filter, funnel.cohort_source_filter)
 
     # Start with base params: workspace_id, window_start, window_end, conversion_window_days
-    base_params = [funnel.workspace_id, window_start, window_end, funnel.conversion_window_days]
+    # workspace_id is dumped to a 16-byte binary because raw `Repo.query!` bypasses Ecto's UUID casting.
+    base_params = [
+      Ecto.UUID.dump!(funnel.workspace_id),
+      window_start,
+      window_end,
+      funnel.conversion_window_days
+    ]
 
     {ctes, params} = build_ctes(funnel.steps, cohort_filter, base_params)
     step_count = length(funnel.steps)
@@ -148,7 +154,17 @@ defmodule GoodAnalytics.Core.Funnels.Query do
 
     filter_parts = Enum.reverse(filter_parts_reversed)
 
-    # Merge cohort source filter into step 1
+    # Combine filter predicates with AND or OR based on step.combine
+    combine_mode = step.combine || :all
+    joiner = if combine_mode == :any, do: " OR ", else: " AND "
+
+    combined =
+      case filter_parts do
+        [single] -> "(#{single})"
+        parts -> "(" <> Enum.map_join(parts, joiner, &"(#{&1})") <> ")"
+      end
+
+    # Merge cohort source filter: wraps the combined group
     {cohort_parts, params} =
       case cohort_filter do
         %{} = cf ->
@@ -158,8 +174,16 @@ defmodule GoodAnalytics.Core.Funnels.Query do
           {[], params}
       end
 
-    all_parts = filter_parts ++ cohort_parts
-    sql = Enum.map(all_parts, &"AND #{&1}") |> Enum.join("\n        ")
+    sql =
+      case cohort_parts do
+        [] ->
+          "AND #{combined}"
+
+        parts ->
+          cohort_sql = Enum.join(parts, " AND ")
+          "AND (#{cohort_sql}) AND #{combined}"
+      end
+
     {sql, params}
   end
 
@@ -180,21 +204,36 @@ defmodule GoodAnalytics.Core.Funnels.Query do
   end
 
   defp filter_to_sql(%{type: "url", match: "equals"} = filter, params) do
+    col = url_column(filter)
     param_idx = length(params) + 1
     params = params ++ [filter.value]
-    {"e.url = $#{param_idx}", params}
+    {"#{col} = $#{param_idx}", params}
   end
 
   defp filter_to_sql(%{type: "url", match: "starts_with"} = filter, params) do
+    col = url_column(filter)
     param_idx = length(params) + 1
     params = params ++ [filter.value <> "%"]
-    {"e.url LIKE $#{param_idx}", params}
+    {"#{col} LIKE $#{param_idx}", params}
   end
 
   defp filter_to_sql(%{type: "url", match: "regex"} = filter, params) do
+    col = url_column(filter)
     param_idx = length(params) + 1
     params = params ++ [filter.value]
-    {"e.url ~ $#{param_idx}", params}
+    {"#{col} ~ $#{param_idx}", params}
+  end
+
+  defp filter_to_sql(%{type: "url", match: "in", values: values} = filter, params)
+       when is_list(values) do
+    col = url_column(filter)
+    param_idx = length(params) + 1
+    params = params ++ [values]
+    {"#{col} = ANY($#{param_idx})", params}
+  end
+
+  defp filter_to_sql(%{type: "url", match: "in"}, params) do
+    {"1=0", params}
   end
 
   defp filter_to_sql(%{type: "property", op: "eq"} = filter, params) do
@@ -241,4 +280,16 @@ defmodule GoodAnalytics.Core.Funnels.Query do
   defp get_filter_field(%{} = filter, key) when is_atom(key) do
     Map.get(filter, key)
   end
+
+  # COALESCE fallbacks extract host/path from e.url for historical events
+  # that predate the v07 migration (where host/path columns are NULL).
+  defp url_column(%{scope: :host}) do
+    "COALESCE(e.host, lower(split_part(split_part(split_part(split_part(e.url, '://', 2), '/', 1), '?', 1), '#', 1)))"
+  end
+
+  defp url_column(%{scope: :path}) do
+    "COALESCE(e.path, NULLIF(split_part(split_part(regexp_replace(e.url, '^https?://[^/]+', ''), '?', 1), '#', 1), ''), '/')"
+  end
+
+  defp url_column(%{scope: :full_url}), do: "e.url"
 end

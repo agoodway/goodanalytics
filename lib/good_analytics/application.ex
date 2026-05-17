@@ -9,7 +9,14 @@ defmodule GoodAnalytics.Application do
     children = [
       {GoodAnalytics.Cache, []},
       {Phoenix.PubSub, name: GoodAnalytics.PubSub},
-      {Task.Supervisor, name: GoodAnalytics.TaskSupervisor},
+      # Main supervisor for background tasks such as RequestLoggerPlug API
+      # request recording. Capped at 10,000 in-flight tasks to prevent
+      # high-volume request logging from creating unbounded task fanout. When
+      # the cap is hit, `Task.Supervisor.start_child/2` returns
+      # `{:error, :max_children}` and callers should degrade gracefully (for
+      # request logging, log and drop the async recording task). Adjust via the
+      # child spec and monitor failures in caller logs if traffic requires it.
+      {Task.Supervisor, name: GoodAnalytics.TaskSupervisor, max_children: 10_000},
       # Dedicated supervisor for fire-and-forget geo enrichment tasks. Capped
       # at 10,000 in-flight tasks so a thundering herd or upstream slowdown
       # cannot exhaust the BEAM via unbounded task fanout. When the cap is

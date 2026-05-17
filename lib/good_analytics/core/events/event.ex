@@ -18,7 +18,16 @@ defmodule GoodAnalytics.Core.Events.Event do
   @primary_key false
   @schema_prefix Application.compile_env(:good_analytics, :schema_prefix, "good_analytics")
 
-  @event_types ~w(link_click pageview session_start identify lead sale share engagement custom)
+  @event_types ~w(link_click pageview session_start identify lead sale share engagement custom api_request)
+  @ingest_types ~w(link_click pageview session_start identify lead sale share engagement custom)
+
+  @doc "Returns the canonical list of all event types (for DB validation)."
+  @spec event_types() :: [String.t()]
+  def event_types, do: @event_types
+
+  @doc "Returns event types accepted via public ingest surfaces (beacon, API)."
+  @spec ingest_types() :: [String.t()]
+  def ingest_types, do: @ingest_types
 
   schema "ga_events" do
     field(:id, Ecto.UUID, primary_key: true, autogenerate: false)
@@ -36,6 +45,8 @@ defmodule GoodAnalytics.Core.Events.Event do
 
     # Page context
     field(:url, :string)
+    field(:host, :string)
+    field(:path, :string)
     field(:referrer, :string)
     field(:referrer_url, :string)
 
@@ -72,6 +83,8 @@ defmodule GoodAnalytics.Core.Events.Event do
     :link_id,
     :click_id,
     :url,
+    :host,
+    :path,
     :referrer,
     :referrer_url,
     :source_platform,
@@ -95,5 +108,7 @@ defmodule GoodAnalytics.Core.Events.Event do
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
     |> validate_inclusion(:event_type, @event_types)
+    |> validate_length(:host, max: 2083)
+    |> validate_length(:path, max: 2083)
   end
 end

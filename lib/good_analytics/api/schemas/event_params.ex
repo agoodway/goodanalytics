@@ -5,6 +5,8 @@ defmodule GoodAnalytics.Api.Schemas.EventParams do
   `event_type` is required, and `visitor_id` takes precedence over
   `person_external_id` when both are provided.
   """
+  alias GoodAnalytics.Core.Events.Event
+
   require OpenApiSpex
 
   OpenApiSpex.schema(%{
@@ -16,15 +18,33 @@ defmodule GoodAnalytics.Api.Schemas.EventParams do
       visitor_id: %OpenApiSpex.Schema{
         type: :string,
         format: :uuid,
-        description: "Visitor UUID (takes precedence over person_external_id)"
+        description: "Internal visitor UUID (highest precedence)"
       },
       person_external_id: %OpenApiSpex.Schema{
         type: :string,
         description: "Host app's external person identifier"
       },
+      person_email: %OpenApiSpex.Schema{
+        type: :string,
+        description: "Person's email address. Used for identification when visitor is resolved via signals."
+      },
+      person_phone: %OpenApiSpex.Schema{
+        type: :string,
+        description: "Person's phone number. Used for identification when visitor is resolved via signals."
+      },
+      ga_id: %OpenApiSpex.Schema{
+        type: :string,
+        description:
+          "Attribution cookie value (_ga_good). Resolved via identity signals when visitor_id and person_external_id are absent."
+      },
+      anonymous_id: %OpenApiSpex.Schema{
+        type: :string,
+        description:
+          "Anonymous cookie value (_ga_anon). Resolved via identity signals when visitor_id, person_external_id, and ga_id are absent."
+      },
       event_type: %OpenApiSpex.Schema{
         type: :string,
-        enum: ~w(link_click pageview session_start identify lead sale share engagement custom)
+        enum: Event.ingest_types()
       },
       event_name: %OpenApiSpex.Schema{
         type: :string,

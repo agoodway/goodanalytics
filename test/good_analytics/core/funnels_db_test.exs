@@ -44,7 +44,10 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
     test "rejects duplicate name in same workspace" do
       create_funnel!(%{name: "Duplicate"})
-      assert {:error, changeset} = Funnels.create_funnel(@workspace_id, Map.put(@valid_attrs, :name, "Duplicate"))
+
+      assert {:error, changeset} =
+               Funnels.create_funnel(@workspace_id, Map.put(@valid_attrs, :name, "Duplicate"))
+
       assert errors_on(changeset)[:name]
     end
 
@@ -52,13 +55,15 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
       funnel = create_funnel!(%{name: "Reusable"})
       {:ok, _} = Funnels.archive_funnel(funnel)
 
-      assert {:ok, %Funnel{}} = Funnels.create_funnel(@workspace_id, Map.put(@valid_attrs, :name, "Reusable"))
+      assert {:ok, %Funnel{}} =
+               Funnels.create_funnel(@workspace_id, Map.put(@valid_attrs, :name, "Reusable"))
     end
   end
 
   describe "update_funnel/2" do
     test "updates name and steps" do
       funnel = create_funnel!()
+
       new_steps = [
         %{kind: "event", label: "PV", filters: [%{type: "event", event_type: "pageview"}]},
         %{kind: "event", label: "Lead", filters: [%{type: "event", event_type: "lead"}]},
@@ -141,6 +146,156 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
     test "returns empty list for workspace with no funnels" do
       assert Funnels.list_funnels(Uniq.UUID.uuid7()) == []
+    end
+  end
+
+  describe "analyze/2 ingest-to-query integration" do
+    test "funnel with scope=path matches recorded event by path" do
+      visitor = create_visitor!()
+
+      {:ok, _event} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor, "pageview", %{
+          url: "https://acme.com/pricing?utm=x"
+        })
+
+      {:ok, _event} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor, "sale", %{})
+
+      funnel =
+        create_funnel!(%{
+          name: "Path Integration #{System.unique_integer([:positive])}",
+          steps: [
+            %{
+              kind: "url",
+              label: "Pricing",
+              filters: [%{type: "url", scope: "path", match: "equals", value: "/pricing"}]
+            },
+            %{
+              kind: "event",
+              label: "Sale",
+              filters: [%{type: "event", event_type: "sale"}]
+            }
+          ]
+        })
+
+      {:ok, result} =
+        Funnels.analyze(funnel,
+          window_start: DateTime.add(DateTime.utc_now(), -3600),
+          window_end: DateTime.add(DateTime.utc_now(), 3600)
+        )
+
+      assert result.total_visitors == 1
+    end
+  end
+
+  describe "analyze/2 combine=any with url-in integration" do
+    test "combine=any with url-in filter matches visitors hitting any listed path" do
+      visitor1 = create_visitor!()
+      visitor2 = create_visitor!()
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor1, "pageview", %{
+          url: "https://acme.com/pricing"
+        })
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor1, "sale", %{})
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor2, "pageview", %{
+          url: "https://acme.com/plans"
+        })
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor2, "sale", %{})
+
+      funnel =
+        create_funnel!(%{
+          name: "Combine Any Integration #{System.unique_integer([:positive])}",
+          steps: [
+            %{
+              kind: "url",
+              label: "Pricing or Plans",
+              combine: "any",
+              filters: [
+                %{type: "url", scope: "path", match: "in", values: ["/pricing", "/plans", "/buy"]}
+              ]
+            },
+            %{
+              kind: "event",
+              label: "Sale",
+              filters: [%{type: "event", event_type: "sale"}]
+            }
+          ]
+        })
+
+      {:ok, result} =
+        Funnels.analyze(funnel,
+          window_start: DateTime.add(DateTime.utc_now(), -3600),
+          window_end: DateTime.add(DateTime.utc_now(), 3600)
+        )
+
+      assert result.total_visitors == 2
+
+      # Assert combine=any was persisted and reloaded correctly
+      reloaded = Funnels.get_funnel(funnel.id)
+      first_step = List.first(reloaded.steps)
+      assert first_step.combine == :any
+    end
+  end
+
+  describe "analyze/2 combine=all with multiple filters" do
+    test "combine=all with 2 filters returns only visitors matching both" do
+      visitor_both = create_visitor!()
+      visitor_one = create_visitor!()
+
+      # visitor_both hits /pricing AND has a sale event
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor_both, "pageview", %{
+          url: "https://acme.com/pricing"
+        })
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor_both, "sale", %{})
+
+      # visitor_one hits /about (does NOT match /pricing)
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor_one, "pageview", %{
+          url: "https://acme.com/about"
+        })
+
+      {:ok, _} =
+        GoodAnalytics.Core.Events.Recorder.record(visitor_one, "sale", %{})
+
+      funnel =
+        create_funnel!(%{
+          name: "Combine All Integration #{System.unique_integer([:positive])}",
+          steps: [
+            %{
+              kind: "url",
+              label: "Pricing path",
+              combine: "all",
+              filters: [
+                %{type: "url", scope: "path", match: "equals", value: "/pricing"},
+                %{type: "url", scope: "path", match: "starts_with", value: "/pric"}
+              ]
+            },
+            %{
+              kind: "event",
+              label: "Sale",
+              filters: [%{type: "event", event_type: "sale"}]
+            }
+          ]
+        })
+
+      {:ok, result} =
+        Funnels.analyze(funnel,
+          window_start: DateTime.add(DateTime.utc_now(), -3600),
+          window_end: DateTime.add(DateTime.utc_now(), 3600)
+        )
+
+      # visitor_both matches both filters, visitor_one matches neither
+      assert result.total_visitors == 1
     end
   end
 

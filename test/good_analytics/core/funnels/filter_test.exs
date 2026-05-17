@@ -73,6 +73,81 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
       refute changeset.valid?
       assert errors_on(changeset)[:value]
     end
+
+    test "accepts scope=path" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :path, match: "equals", value: "/pricing"})
+      assert changeset.valid?
+    end
+
+    test "accepts scope=host" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :host, match: "equals", value: "acme.com"})
+      assert changeset.valid?
+    end
+
+    test "accepts scope=full_url" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :full_url, match: "equals", value: "https://acme.com"})
+      assert changeset.valid?
+    end
+
+    test "rejects unknown scope" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: "fragment", match: "equals", value: "x"})
+      refute changeset.valid?
+      assert errors_on(changeset)[:scope]
+    end
+
+    test "defaults scope to path when omitted" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "equals", value: "/pricing"})
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :scope) == :path
+    end
+
+    test "accepts match=in with values list" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: ["/pricing", "/plans"]})
+      assert changeset.valid?
+    end
+
+    test "rejects match=in with empty values" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: []})
+      refute changeset.valid?
+      assert errors_on(changeset)[:values]
+    end
+
+    test "rejects match=in with nil values" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in"})
+      refute changeset.valid?
+      assert errors_on(changeset)[:values]
+    end
+
+    test "rejects match=in when both value and values present" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", value: "/pricing", values: ["/plans"]})
+      refute changeset.valid?
+      assert errors_on(changeset)[:value]
+    end
+
+    test "rejects match=in when all values are empty strings (cast to empty list)" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: ["", ""]})
+      refute changeset.valid?
+      assert errors_on(changeset)[:values]
+    end
+
+    test "rejects match=in with more than 50 values" do
+      values = for i <- 1..51, do: "/page-#{i}"
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: values})
+      refute changeset.valid?
+      assert errors_on(changeset)[:values]
+    end
+
+    test "rejects match=in with value longer than 2000 chars" do
+      long_value = "/" <> String.duplicate("a", 2001)
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: [long_value]})
+      refute changeset.valid?
+      assert errors_on(changeset)[:values]
+    end
+
+    test "accepts match=in with value=\"\" and valid values list (empty string not exclusive)" do
+      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", value: "", values: ["/pricing"]})
+      assert changeset.valid?
+    end
   end
 
   describe "property filter changeset" do
@@ -144,6 +219,56 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     test "rejects source filter with no fields" do
       changeset = Filter.changeset(%Filter{}, %{type: "source"})
       refute changeset.valid?
+    end
+  end
+
+  describe "scope round-trip through string form" do
+    test "scope=host survives atom->string->changeset round-trip" do
+      # Simulates the FormComponent filter_to_map -> changeset path
+      filter = %Filter{type: "url", scope: :host, match: "equals", value: "acme.com"}
+      string_scope = Atom.to_string(filter.scope)
+      assert string_scope == "host"
+
+      changeset = Filter.changeset(%Filter{}, %{
+        type: "url",
+        scope: string_scope,
+        match: "equals",
+        value: "acme.com"
+      })
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :scope) == :host
+    end
+
+    test "scope=full_url survives atom->string->changeset round-trip" do
+      filter = %Filter{type: "url", scope: :full_url, match: "equals", value: "https://acme.com"}
+      string_scope = Atom.to_string(filter.scope)
+      assert string_scope == "full_url"
+
+      changeset = Filter.changeset(%Filter{}, %{
+        type: "url",
+        scope: string_scope,
+        match: "equals",
+        value: "https://acme.com"
+      })
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :scope) == :full_url
+    end
+
+    test "scope=path survives atom->string->changeset round-trip" do
+      filter = %Filter{type: "url", scope: :path, match: "equals", value: "/pricing"}
+      string_scope = Atom.to_string(filter.scope)
+
+      changeset = Filter.changeset(%Filter{}, %{
+        type: "url",
+        scope: string_scope,
+        match: "equals",
+        value: "/pricing"
+      })
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :scope) == :path
     end
   end
 

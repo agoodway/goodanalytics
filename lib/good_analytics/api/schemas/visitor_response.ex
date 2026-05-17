@@ -20,6 +20,7 @@ defmodule GoodAnalytics.Api.Schemas.VisitorResponse do
       },
       person_external_id: %OpenApiSpex.Schema{type: :string, nullable: true},
       person_email: %OpenApiSpex.Schema{type: :string, nullable: true},
+      person_phone: %OpenApiSpex.Schema{type: :string, nullable: true},
       person_name: %OpenApiSpex.Schema{type: :string, nullable: true},
       person_metadata: %OpenApiSpex.Schema{type: :object},
       first_source: %OpenApiSpex.Schema{type: :object, nullable: true},

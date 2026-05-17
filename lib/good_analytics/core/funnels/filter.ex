@@ -4,7 +4,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
 
   Supports four filter types:
   - `event`: matches by event_type (and optional event_name)
-  - `url`: matches by URL with equals/starts_with/regex
+  - `url`: matches by URL with equals/starts_with/regex/in
   - `property`: matches event properties by key with eq/in operators
   - `source`: matches source_platform/source_medium/source_campaign
   """
@@ -12,6 +12,8 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
   use Ecto.Schema
 
   import Ecto.Changeset
+
+  alias GoodAnalytics.Core.Events.Event
 
   @primary_key false
   embedded_schema do
@@ -22,6 +24,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
     field(:event_name, :string)
 
     # URL filter fields
+    field(:scope, Ecto.Enum, values: [:path, :host, :full_url], default: :path)
     field(:match, :string)
     field(:value, :string)
 
@@ -38,8 +41,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
   end
 
   @filter_types ~w(event url property source)
-  @event_types ~w(link_click pageview session_start identify lead sale share engagement custom)
-  @url_match_modes ~w(equals starts_with regex)
+  @url_match_modes ~w(equals starts_with regex in)
   @property_ops ~w(eq in)
 
   def changeset(filter, attrs) do
@@ -48,6 +50,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
       :type,
       :event_type,
       :event_name,
+      :scope,
       :match,
       :value,
       :key,
@@ -75,15 +78,60 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
   defp validate_event_filter(changeset) do
     changeset
     |> validate_required([:event_type])
-    |> validate_inclusion(:event_type, @event_types)
+    |> validate_inclusion(:event_type, Event.event_types())
   end
 
   defp validate_url_filter(changeset) do
     changeset
-    |> validate_required([:match, :value])
+    |> validate_required([:match])
     |> validate_inclusion(:match, @url_match_modes)
-    |> validate_length(:value, max: 2000)
-    |> validate_regex_syntax()
+    |> validate_url_by_match()
+  end
+
+  defp validate_url_by_match(changeset) do
+    case get_field(changeset, :match) do
+      "in" ->
+        changeset
+        |> validate_url_in_values()
+        |> validate_url_in_value_exclusivity()
+
+      _ ->
+        changeset
+        |> validate_required([:value])
+        |> validate_length(:value, max: 2000)
+        |> validate_regex_syntax()
+    end
+  end
+
+  defp validate_url_in_values(changeset) do
+    values = get_field(changeset, :values)
+
+    cond do
+      is_nil(values) or values == [] ->
+        add_error(changeset, :values, "must be a non-empty list for url 'in' match mode")
+
+      Enum.any?(values, &(&1 == "")) ->
+        add_error(changeset, :values, "all entries must be non-empty strings")
+
+      length(values) > 50 ->
+        add_error(changeset, :values, "must have 50 or fewer values")
+
+      Enum.any?(values, &(String.length(&1) > 2000)) ->
+        add_error(changeset, :values, "each value must be 2000 characters or fewer")
+
+      true ->
+        changeset
+    end
+  end
+
+  defp validate_url_in_value_exclusivity(changeset) do
+    value = get_field(changeset, :value)
+
+    if is_binary(value) and value != "" do
+      add_error(changeset, :value, "value and values are mutually exclusive for url 'in' match mode")
+    else
+      changeset
+    end
   end
 
   defp validate_regex_syntax(changeset) do

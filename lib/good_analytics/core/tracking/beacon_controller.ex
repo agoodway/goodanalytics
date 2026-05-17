@@ -11,10 +11,8 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   require Logger
 
   alias GoodAnalytics.Connectors.Signals
-  alias GoodAnalytics.Core.{Events.Recorder, IdentityResolver, Links}
+  alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links}
   alias GoodAnalytics.Geo
-
-  @valid_event_types ~w(link_click pageview session_start identify lead sale share engagement custom)
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
 
   @doc """
@@ -57,7 +55,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         event_type = Map.get(params, "event_type", "pageview")
 
         cond do
-          event_type not in @valid_event_types ->
+          event_type not in Event.ingest_types() ->
             conn
             |> put_status(422)
             |> json(%{status: "error", message: "invalid event_type"})
@@ -211,7 +209,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   defp truthy?(value) when value in [true, "true", 1, "1"], do: true
   defp truthy?(_), do: false
 
-  @max_url_length 2048
+  @max_url_length 2083
   @max_fingerprint_length 128
   # Maximum number of event properties preserved after sanitization.
   @max_properties 50

@@ -30,6 +30,7 @@ defmodule GoodAnalytics.Core.Visitors.Visitor do
     # the visitor reaches `customer` status).
     field(:person_external_id, :string)
     field(:person_email, :string)
+    field(:person_phone, :string)
     field(:person_name, :string)
     field(:person_metadata, :map, default: %{})
 
@@ -88,6 +89,7 @@ defmodule GoodAnalytics.Core.Visitors.Visitor do
     :ga_id,
     :person_external_id,
     :person_email,
+    :person_phone,
     :person_name,
     :person_metadata,
     :first_source,
@@ -139,6 +141,7 @@ defmodule GoodAnalytics.Core.Visitors.Visitor do
     |> cast(attrs, [
       :person_external_id,
       :person_email,
+      :person_phone,
       :person_name,
       :person_metadata,
       :status,

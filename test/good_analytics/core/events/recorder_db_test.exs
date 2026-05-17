@@ -43,6 +43,67 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
       assert_receive {:event_recorded, ^event}
     end
 
+    test "computes host and path from url" do
+      visitor = create_visitor!()
+
+      assert {:ok, event} =
+               Recorder.record(visitor, "pageview", %{
+                 url: "https://app.acme.com/pricing?utm_source=x#section"
+               })
+
+      assert event.host == "app.acme.com"
+      assert event.path == "/pricing"
+      assert event.url == "https://app.acme.com/pricing?utm_source=x#section"
+
+      # Re-read from DB to verify columns are actually persisted
+      db_event = Events.get_by_id(event.id)
+      assert db_event.host == "app.acme.com"
+      assert db_event.path == "/pricing"
+    end
+
+    test "handles trailing slash and duplicate slashes in url" do
+      visitor = create_visitor!()
+
+      {:ok, e1} = Recorder.record(visitor, "pageview", %{url: "https://acme.com/pricing/"})
+      assert e1.path == "/pricing"
+
+      {:ok, e2} = Recorder.record(visitor, "pageview", %{url: "https://acme.com/"})
+      assert e2.path == "/"
+
+      {:ok, e3} = Recorder.record(visitor, "pageview", %{url: "https://acme.com//docs///guide"})
+      assert e3.path == "/docs/guide"
+    end
+
+    test "strips default ports from host" do
+      visitor = create_visitor!()
+
+      {:ok, e1} = Recorder.record(visitor, "pageview", %{url: "http://acme.com:80/x"})
+      assert e1.host == "acme.com"
+
+      {:ok, e2} = Recorder.record(visitor, "pageview", %{url: "https://acme.com:443/x"})
+      assert e2.host == "acme.com"
+
+      {:ok, e3} = Recorder.record(visitor, "pageview", %{url: "https://acme.com:8443/x"})
+      assert e3.host == "acme.com:8443"
+    end
+
+    test "host is nil and path is / for explicit nil url" do
+      visitor = create_visitor!()
+      {:ok, event} = Recorder.record(visitor, "pageview", %{url: nil})
+      assert event.host == nil
+      assert event.path == "/"
+    end
+
+    test "normalizes host and path from string-keyed url attrs" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{"url" => "https://acme.com/pricing?utm=x"})
+
+      assert event.host == "acme.com"
+      assert event.path == "/pricing"
+    end
+
     test "returns error changeset for invalid event_type" do
       visitor = create_visitor!()
       assert {:error, changeset} = Recorder.record(visitor, "invalid_type")

@@ -9,6 +9,8 @@ defmodule GoodAnalytics.Core.Funnels do
 
   import Ecto.Query
 
+  @max_funnel_query_timeout_ms 3_600_000
+
   @doc "Creates a funnel definition for a workspace."
   def create_funnel(workspace_id, attrs) do
     repo = Repo.repo()
@@ -86,7 +88,8 @@ defmodule GoodAnalytics.Core.Funnels do
   @doc """
   Analyzes a funnel for the given time window.
 
-  Returns a result map with per-step counts, conversion rates, and median time.
+  Returns `{:ok, result}` with per-step counts, conversion rates, and median time,
+  or `{:error, reason}` when the query fails.
 
   ## Options
     * `:window_start` - start of analysis window (required)
@@ -97,10 +100,41 @@ defmodule GoodAnalytics.Core.Funnels do
     repo = Repo.repo()
     {sql, params} = Query.build_sql(funnel, opts)
 
-    result =
-      repo.query!(sql, params, prefix: GoodAnalytics.schema_name())
+    timeout_ms =
+      :good_analytics
+      |> Application.get_env(:funnel_query_timeout_ms, 30_000)
+      |> validate_timeout_ms!()
 
-    compute_analysis(funnel, result)
+    result =
+      repo.transaction(fn ->
+        repo.query!("SET LOCAL statement_timeout = '#{timeout_ms}ms'", [],
+          prefix: GoodAnalytics.schema_name()
+        )
+
+        repo.query!(sql, params, prefix: GoodAnalytics.schema_name())
+      end)
+
+    case result do
+      {:ok, query_result} -> {:ok, compute_analysis(funnel, query_result)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_timeout_ms!(timeout_ms)
+       when is_integer(timeout_ms) and timeout_ms > 0 and
+              timeout_ms <= @max_funnel_query_timeout_ms,
+       do: timeout_ms
+
+  defp validate_timeout_ms!(timeout_ms) when is_binary(timeout_ms) do
+    case Integer.parse(timeout_ms) do
+      {parsed, ""} -> validate_timeout_ms!(parsed)
+      _ -> raise ArgumentError, "funnel_query_timeout_ms must be a positive integer"
+    end
+  end
+
+  defp validate_timeout_ms!(_timeout_ms) do
+    raise ArgumentError,
+          "funnel_query_timeout_ms must be a positive integer no greater than #{@max_funnel_query_timeout_ms}"
   end
 
   defp compute_analysis(funnel, result) do
@@ -142,10 +176,8 @@ defmodule GoodAnalytics.Core.Funnels do
           step_index: index,
           label: step.label,
           count: count,
-          conversion_to_step_1:
-            if(total_visitors == 0, do: 0.0, else: count / total_visitors),
-          conversion_to_prev:
-            if(prev_count == 0, do: 0.0, else: count / prev_count),
+          conversion_to_step_1: if(total_visitors == 0, do: 0.0, else: count / total_visitors),
+          conversion_to_prev: if(prev_count == 0, do: 0.0, else: count / prev_count),
           drop_off: prev_count - count
         }
       end)

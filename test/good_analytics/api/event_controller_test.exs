@@ -87,6 +87,20 @@ defmodule GoodAnalytics.Api.EventControllerTest do
       assert conn.status == 201
     end
 
+    test "does not fall back to signal matching when person_external_id is not found" do
+      visitor = create_visitor!(%{ga_id: "ga_123"})
+
+      conn =
+        api_conn(:post, "/events", %{
+          person_external_id: "missing_cust",
+          ga_id: visitor.ga_id,
+          event_type: "custom",
+          event_name: "upgrade"
+        })
+
+      assert conn.status == 404
+    end
+
     test "returns 404 when visitor not found" do
       conn =
         api_conn(:post, "/events", %{

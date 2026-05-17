@@ -169,6 +169,7 @@ defmodule GoodAnalytics.Api.VisitorController do
       status: visitor.status,
       person_external_id: visitor.person_external_id,
       person_email: visitor.person_email,
+      person_phone: visitor.person_phone,
       person_name: visitor.person_name,
       person_metadata: visitor.person_metadata,
       first_source: visitor.first_source,
