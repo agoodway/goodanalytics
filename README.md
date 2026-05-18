@@ -291,6 +291,78 @@ GoodAnalytics.track_lead(visitor, %{person_external_id: "cust_123"})
 GoodAnalytics.track_sale(visitor, %{amount_cents: 4900, currency: "USD"})
 ```
 
+### Server-Side Tracking In Phoenix Controllers
+
+`GoodAnalytics.track/3` expects a resolved visitor. In Phoenix, resolve the
+visitor from the tracking signals assigned by `GoodAnalytics.Core.Tracking.Plug`,
+then pass that visitor to `track/3`, `track_lead/3`, or `track_sale/3`.
+
+For browser `GET` requests that pass through the tracking plug:
+
+```elixir
+def show(conn, _params) do
+  workspace_id = conn.assigns.workspace_id || GoodAnalytics.default_workspace_id()
+
+  {:ok, visitor} =
+    GoodAnalytics.resolve_visitor(conn.assigns.ga_signals,
+      workspace_id: workspace_id
+    )
+
+  {:ok, _event} =
+    GoodAnalytics.track(visitor, "custom", %{
+      event_name: "Viewed Dashboard",
+      url: Phoenix.Controller.current_url(conn)
+    })
+
+  render(conn, :show)
+end
+```
+
+For `POST` requests or controller actions that may not run the tracking plug,
+build signals from the GoodAnalytics cookies:
+
+```elixir
+def create(conn, params) do
+  conn = Plug.Conn.fetch_cookies(conn)
+  workspace_id = conn.assigns.workspace_id || GoodAnalytics.default_workspace_id()
+
+  signals = %{
+    ga_id: conn.cookies["_ga_good"],
+    anonymous_id: conn.cookies["_ga_anon"],
+    source: conn.assigns[:ga_source]
+  }
+
+  {:ok, visitor} =
+    GoodAnalytics.resolve_visitor(signals, workspace_id: workspace_id)
+
+  {:ok, _event} =
+    GoodAnalytics.track(visitor, "custom", %{
+      event_name: "Submitted Form",
+      properties: params
+    })
+
+  redirect(conn, to: ~p"/thanks")
+end
+```
+
+If the user is authenticated, identify the visitor before recording the event:
+
+```elixir
+{:ok, visitor} =
+  GoodAnalytics.identify(visitor, %{
+    person_external_id: to_string(conn.assigns.current_scope.user.id),
+    person_email: conn.assigns.current_scope.user.email
+  })
+
+GoodAnalytics.track(visitor, "lead", %{url: Phoenix.Controller.current_url(conn)})
+```
+
+The server-side flow is:
+
+```text
+conn/cookies -> signals -> GoodAnalytics.resolve_visitor/2 -> visitor -> GoodAnalytics.track/3
+```
+
 ### Server-Side Conversions
 
 Submit conversions that also trigger connector dispatch (Meta CAPI, Google Ads, etc.):
