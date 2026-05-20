@@ -30,6 +30,8 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   alias GoodAnalytics.Core.IdentityResolver
   alias GoodAnalytics.Core.Links
   alias GoodAnalytics.Core.Links.Link
+  alias GoodAnalytics.Core.Partners
+  alias GoodAnalytics.Core.Partners.Attribution
   alias GoodAnalytics.Core.Tracking.{Deduplication, SourceClassifier}
   alias GoodAnalytics.Geo
   alias GoodAnalytics.Hooks
@@ -45,6 +47,7 @@ defmodule GoodAnalytics.Core.Links.Redirect do
     conn = Plug.Conn.fetch_cookies(conn)
 
     with {:ok, link} <- Links.resolve_live_link(domain, key),
+         {:ok, _} <- validate_referral_partner(link),
          {:ok, destination} <- validate_destination_url(link, conn) do
       click_id = Uniq.UUID.uuid7()
       ga_id = conn.cookies["_ga_good"] || click_id
@@ -54,8 +57,13 @@ defmodule GoodAnalytics.Core.Links.Redirect do
       geo_map = lookup_geo(conn.remote_ip)
       signals = build_signals(click_id, ga_id, source, geo_map)
       visitor = resolve_visitor(signals, link.workspace_id)
+      referral_context = build_referral_context(link, click_id)
 
-      record_click_if_unique(conn, link, visitor, click_id, source, qr)
+      if visitor && referral_context do
+        Attribution.set_partner_attribution(visitor.id, referral_context)
+      end
+
+      record_click_if_unique(conn, link, visitor, click_id, source, qr, referral_context)
 
       final_destination = build_redirect_url(destination, link, conn, click_id, geo_map)
 
@@ -72,6 +80,7 @@ defmodule GoodAnalytics.Core.Links.Redirect do
         )
 
       conn
+      |> Attribution.maybe_set_cookie(referral_context)
       |> apply_hook_cookies(hook_results)
       |> Phoenix.Controller.redirect(external: final_destination)
     else
@@ -89,8 +98,43 @@ defmodule GoodAnalytics.Core.Links.Redirect do
         conn
         |> put_status(400)
         |> Phoenix.Controller.text("Invalid destination URL")
+
+      {:error, :inactive_partner} ->
+        conn
+        |> put_status(404)
+        |> Phoenix.Controller.text("Link not found")
     end
   end
+
+  defp validate_referral_partner(%{link_type: "referral", partner_id: pid} = link)
+       when is_binary(pid) do
+    case Partners.get_active_partner(link.workspace_id, pid) do
+      nil -> {:error, :inactive_partner}
+      partner -> {:ok, partner}
+    end
+  end
+
+  defp validate_referral_partner(%{link_type: "referral", partner_id: nil} = link) do
+    Logger.warning(
+      "GoodAnalytics: referral link #{link.id} has no partner_id — treating as non-referral"
+    )
+
+    {:ok, nil}
+  end
+
+  defp validate_referral_partner(_link), do: {:ok, nil}
+
+  defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
+       when is_binary(pid) do
+    %{
+      partner_id: pid,
+      referral_link_id: link.id,
+      referral_click_id: click_id,
+      workspace_id: link.workspace_id
+    }
+  end
+
+  defp build_referral_context(_link, _click_id), do: nil
 
   defp lookup_geo(remote_ip) do
     case Geo.lookup(remote_ip) do
@@ -112,20 +156,24 @@ defmodule GoodAnalytics.Core.Links.Redirect do
     end
   end
 
-  defp record_click_if_unique(conn, link, visitor, click_id, source, qr) do
+  defp record_click_if_unique(conn, link, visitor, click_id, source, qr, referral_context) do
     case Deduplication.check(conn, link) do
       {:ok, true} ->
         Links.increment_clicks(link.id, true)
 
         if visitor do
-          Recorder.record_click(visitor, link, %{
-            click_id: click_id,
-            source: source,
-            ip_address: get_client_ip(conn),
-            user_agent: get_user_agent(conn),
-            referrer: get_referrer(conn),
-            qr: qr
-          })
+          attrs =
+            %{
+              click_id: click_id,
+              source: source,
+              ip_address: get_client_ip(conn),
+              user_agent: get_user_agent(conn),
+              referrer: get_referrer(conn),
+              qr: qr
+            }
+            |> Attribution.merge_into_attrs(referral_context)
+
+          Recorder.record_click(visitor, link, attrs)
         end
 
       _ ->

@@ -11,7 +11,10 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   require Logger
 
   alias GoodAnalytics.Connectors.Signals
-  alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links}
+  alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links, Partners}
+  alias GoodAnalytics.Core.Partners.Attribution
+  alias GoodAnalytics.Core.Tracking.ReferralCookie
+  alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Geo
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
 
@@ -70,17 +73,22 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
             server_signals = connector_signals(conn.assigns[:ga_signals])
             connector_signals = Signals.merge([server_signals, js_signals])
 
-            event_attrs = %{
-              url: sanitize_url(Map.get(params, "url")),
-              referrer: sanitize_url(Map.get(params, "referrer")),
-              source: conn.assigns[:ga_source],
-              properties: sanitize_properties(Map.get(params, "properties", %{})),
-              event_id: validate_event_id(Map.get(params, "event_id")),
-              fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-              ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
-              user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
-              connector_signals: connector_signals
-            }
+            # Derive referral context from payload token or visitor state
+            referral_attrs = derive_referral_context(visitor, params)
+
+            event_attrs =
+              %{
+                url: sanitize_url(Map.get(params, "url")),
+                referrer: sanitize_url(Map.get(params, "referrer")),
+                source: conn.assigns[:ga_source],
+                properties: sanitize_properties(Map.get(params, "properties", %{})),
+                event_id: validate_event_id(Map.get(params, "event_id")),
+                fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
+                ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
+                user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
+                connector_signals: connector_signals
+              }
+              |> Map.merge(referral_attrs)
 
             Recorder.record(visitor, event_type, event_attrs)
             Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
@@ -138,6 +146,9 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         link.workspace_id ||
         GoodAnalytics.default_workspace_id()
 
+    # Validate referral partner if this is a referral link
+    referral_context = build_referral_context(link, click_id)
+
     signals = %{
       click_id: click_id,
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
@@ -147,36 +158,82 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
       {:ok, visitor} ->
-        record_result =
-          Recorder.record_click(visitor, link, %{
+        # Update visitor partner attribution for referral clicks
+        if referral_context do
+          Attribution.set_partner_attribution(visitor.id, referral_context)
+        end
+
+        click_attrs =
+          %{
             click_id: click_id,
             source: conn.assigns[:ga_source],
             ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
             user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
             url: sanitize_url(Map.get(params, "url")),
             referrer: sanitize_url(Map.get(params, "referrer"))
-          })
+          }
+          |> Attribution.merge_into_attrs(referral_context)
 
-        case record_result do
-          {:ok, _event} ->
-            Links.increment_clicks(link.id, true)
-
-          {:error, _changeset} ->
-            :ok
+        case Recorder.record_click(visitor, link, click_attrs) do
+          {:ok, _event} -> Links.increment_clicks(link.id, true)
+          {:error, _changeset} -> :ok
         end
 
         Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
 
-        json(conn, %{
-          status: "ok",
-          ga_id: click_id,
-          visitor_id: visitor.id
-        })
+        response = %{status: "ok", ga_id: click_id, visitor_id: visitor.id}
+
+        conn
+        |> Attribution.maybe_set_cookie(referral_context)
+        |> json(response)
 
       {:error, _reason} ->
         json(conn, %{status: "ok", ga_id: click_id})
     end
   end
+
+  defp derive_referral_context(%Visitor{} = visitor, params) do
+    # Priority: payload token > visitor last_partner attribution
+    case verify_payload_ref_token(params) do
+      {:ok, context} ->
+        Map.take(context, [:partner_id, :referral_link_id, :referral_click_id])
+
+      {:error, _} ->
+        if visitor.last_partner_id do
+          %{
+            partner_id: visitor.last_partner_id,
+            referral_link_id: visitor.last_referral_link_id,
+            referral_click_id: visitor.last_referral_click_id
+          }
+        else
+          %{}
+        end
+    end
+  end
+
+  defp verify_payload_ref_token(%{"_ga_ref" => token}) when is_binary(token) do
+    ReferralCookie.verify(token)
+  end
+
+  defp verify_payload_ref_token(_), do: {:error, :not_present}
+
+  defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
+       when is_binary(pid) do
+    case Partners.get_active_partner(link.workspace_id, pid) do
+      nil ->
+        nil
+
+      _partner ->
+        %{
+          partner_id: pid,
+          referral_link_id: link.id,
+          referral_click_id: click_id,
+          workspace_id: link.workspace_id
+        }
+    end
+  end
+
+  defp build_referral_context(_link, _click_id), do: nil
 
   defp workspace_id(conn, params) do
     conn.private[:workspace_id] ||
@@ -187,7 +244,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   defp click_domain(conn, _params, workspace_id) when is_binary(workspace_id),
     do: request_host(conn)
 
-  defp click_domain(conn, params, _workspace_id), do: Map.get(params, "domain", conn.host)
+  defp click_domain(conn, _params, _workspace_id), do: request_host(conn)
 
   defp connector_signals(%{connector_signals: connector_signals}) when is_map(connector_signals),
     do: connector_signals
