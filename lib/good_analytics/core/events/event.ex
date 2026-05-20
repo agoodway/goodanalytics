@@ -43,6 +43,11 @@ defmodule GoodAnalytics.Core.Events.Event do
     field(:link_id, Ecto.UUID)
     field(:click_id, Ecto.UUID)
 
+    # Partner attribution snapshot (immutable after insert)
+    field(:partner_id, Ecto.UUID)
+    field(:referral_link_id, Ecto.UUID)
+    field(:referral_click_id, Ecto.UUID)
+
     # Page context
     field(:url, :string)
     field(:host, :string)
@@ -82,6 +87,9 @@ defmodule GoodAnalytics.Core.Events.Event do
     :event_name,
     :link_id,
     :click_id,
+    :partner_id,
+    :referral_link_id,
+    :referral_click_id,
     :url,
     :host,
     :path,

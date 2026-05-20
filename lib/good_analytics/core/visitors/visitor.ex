@@ -38,12 +38,16 @@ defmodule GoodAnalytics.Core.Visitors.Visitor do
     field(:first_source, :map)
     field(:first_click_id, Ecto.UUID)
     field(:first_partner_id, Ecto.UUID)
+    field(:first_referral_link_id, Ecto.UUID)
+    field(:first_referral_click_id, Ecto.UUID)
     field(:first_seen_at, :utc_datetime_usec)
 
     # Last-Touch Attribution
     field(:last_source, :map)
     field(:last_click_id, Ecto.UUID)
     field(:last_partner_id, Ecto.UUID)
+    field(:last_referral_link_id, Ecto.UUID)
+    field(:last_referral_click_id, Ecto.UUID)
     field(:last_seen_at, :utc_datetime_usec)
 
     # Multi-Touch Attribution
@@ -95,10 +99,14 @@ defmodule GoodAnalytics.Core.Visitors.Visitor do
     :first_source,
     :first_click_id,
     :first_partner_id,
+    :first_referral_link_id,
+    :first_referral_click_id,
     :first_seen_at,
     :last_source,
     :last_click_id,
     :last_partner_id,
+    :last_referral_link_id,
+    :last_referral_click_id,
     :last_seen_at,
     :attribution_path,
     :click_id_params,
