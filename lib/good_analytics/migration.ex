@@ -32,7 +32,8 @@ defmodule GoodAnalytics.Migration do
       GoodAnalytics.Migrations.V04,
       GoodAnalytics.Migrations.V05,
       GoodAnalytics.Migrations.V06,
-      GoodAnalytics.Migrations.V07
+      GoodAnalytics.Migrations.V07,
+      GoodAnalytics.Migrations.V08
     ],
     tracking_object: {:view, "ga_version"}
 end
