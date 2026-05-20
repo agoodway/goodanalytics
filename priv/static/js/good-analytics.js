@@ -12,6 +12,7 @@
       cookieName: '_ga_good',
       identityStorageKey: '_ga_good_id',
       anonCookieName: '_ga_anon',
+      refCookieName: '_ga_ref',
       cookieDays: 90,
       queryParam: 'ga_id',
       viaParam: 'via',
@@ -102,6 +103,9 @@
         if (data.ga_id) {
           self.setIdentity(data.ga_id);
         }
+        // The server sets the _ga_ref cookie directly via Set-Cookie header.
+        // No client-side cookie write needed — the cookie is NOT HttpOnly
+        // so we can read it for beacon forwarding.
         if (self.config.cleanUrl) {
           self.cleanUrl([self.config.viaParam, self.config.refParam]);
         }
@@ -130,6 +134,10 @@
       }
       if (this._fingerprint) payload.fingerprint = this._fingerprint;
       if (this.config.workspaceId) payload.workspace_id = this.config.workspaceId;
+
+      // Include referral cookie token for server-side attribution
+      var refCookie = this.getCookie(this.config.refCookieName);
+      if (refCookie) payload._ga_ref = refCookie;
 
       // Forward connector browser identifiers
       this._addConnectorSignals(payload);
@@ -168,6 +176,7 @@
     forget: function() {
       this.deleteCookie(this.config.cookieName);
       this.deleteCookie(this.config.anonCookieName);
+      this.deleteCookie(this.config.refCookieName);
       try { window.localStorage.removeItem(this.config.identityStorageKey); } catch(e) {}
     },
 
