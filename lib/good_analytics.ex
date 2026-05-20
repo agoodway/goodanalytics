@@ -18,6 +18,7 @@ defmodule GoodAnalytics do
   alias GoodAnalytics.Core.Events.Recorder
   alias GoodAnalytics.Core.IdentityResolver
   alias GoodAnalytics.Core.Links
+  alias GoodAnalytics.Core.Partners
   alias GoodAnalytics.Core.Tracking.ShareLinks
   alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Hooks
@@ -101,6 +102,28 @@ defmodule GoodAnalytics do
   def last_event(visitor_id, event_type) do
     Events.last_event(visitor_id, event_type)
   end
+
+  # ── Partners ──
+
+  @doc "Create a referral partner."
+  def create_partner(attrs), do: Partners.create_partner(attrs)
+
+  @doc "Get a partner by ID, scoped to a workspace."
+  def get_partner(workspace_id, id), do: Partners.get_partner(workspace_id, id)
+
+  @doc "List partners for a workspace."
+  def list_partners(workspace_id, opts \\ []),
+    do: Partners.list_partners(workspace_id, opts)
+
+  @doc "Update a partner, scoped to a workspace."
+  def update_partner(workspace_id, id, attrs), do: Partners.update_partner(workspace_id, id, attrs)
+
+  @doc "Archive a partner, scoped to a workspace."
+  def archive_partner(workspace_id, id), do: Partners.archive_partner(workspace_id, id)
+
+  @doc "Get an active partner by key and workspace."
+  def get_active_partner_by_key(workspace_id, key),
+    do: Partners.get_active_partner_by_key(workspace_id, key)
 
   # ── Links ──
 

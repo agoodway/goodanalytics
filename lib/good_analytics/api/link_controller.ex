@@ -257,6 +257,7 @@ defmodule GoodAnalytics.Api.LinkController do
       key: link.key,
       url: link.url,
       link_type: link.link_type,
+      partner_id: link.partner_id,
       utm_source: link.utm_source,
       utm_medium: link.utm_medium,
       utm_campaign: link.utm_campaign,
