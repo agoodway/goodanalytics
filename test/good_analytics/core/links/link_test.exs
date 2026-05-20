@@ -35,7 +35,16 @@ defmodule GoodAnalytics.Core.Links.LinkTest do
 
     test "accepts all valid link types" do
       for type <- ~w(short referral campaign) do
-        changeset = Link.changeset(%Link{}, Map.put(@valid_attrs, :link_type, type))
+        attrs =
+          @valid_attrs
+          |> Map.put(:link_type, type)
+          |> then(fn attrs ->
+            if type == "referral",
+              do: Map.put(attrs, :partner_id, Uniq.UUID.uuid7()),
+              else: attrs
+          end)
+
+        changeset = Link.changeset(%Link{}, attrs)
         assert changeset.valid?, "expected #{type} to be valid"
       end
     end
