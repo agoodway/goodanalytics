@@ -17,7 +17,7 @@ defmodule GoodAnalytics.Core.Tracking.Plug do
   @behaviour Plug
 
   alias GoodAnalytics.Connectors.Signals
-  alias GoodAnalytics.Core.Tracking.SourceClassifier
+  alias GoodAnalytics.Core.Tracking.{ReferralCookie, SourceClassifier}
 
   @ga_cookie "_ga_good"
   @anon_cookie "_ga_anon"
@@ -34,6 +34,7 @@ defmodule GoodAnalytics.Core.Tracking.Plug do
       |> Plug.Conn.fetch_query_params()
       |> classify_source()
       |> manage_cookies()
+      |> manage_referral_cookie()
       |> set_referrer_policy()
       |> assign_signals()
     else
@@ -82,6 +83,19 @@ defmodule GoodAnalytics.Core.Tracking.Plug do
       secure: true,
       path: "/"
     )
+  end
+
+  defp manage_referral_cookie(conn) do
+    case ReferralCookie.read_from_conn(conn) do
+      {:ok, context} ->
+        # Refresh the cookie (re-sign with fresh expiry) and assign context
+        conn
+        |> ReferralCookie.set_on_conn(context)
+        |> Plug.Conn.assign(:ga_referral_context, context)
+
+      {:error, _} ->
+        conn
+    end
   end
 
   defp set_referrer_policy(conn) do

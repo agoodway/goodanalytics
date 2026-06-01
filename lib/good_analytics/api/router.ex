@@ -24,6 +24,10 @@ defmodule GoodAnalytics.Api.Router do
     post("/events", GoodAnalytics.Api.EventController, :create)
     post("/events/batch", GoodAnalytics.Api.EventController, :batch)
 
+    # Partners
+    resources "/partners", GoodAnalytics.Api.PartnerController,
+      only: [:create, :index, :show, :update, :delete]
+
     # Links
     resources "/links", GoodAnalytics.Api.LinkController,
       only: [:create, :index, :show, :update, :delete] do

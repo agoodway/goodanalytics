@@ -59,6 +59,25 @@ defmodule GoodAnalytics.Api.Schemas.EventParams do
       currency: %OpenApiSpex.Schema{type: :string, description: "ISO 4217 currency code"},
       url: %OpenApiSpex.Schema{type: :string, description: "Page URL where the event occurred"},
       referrer: %OpenApiSpex.Schema{type: :string, description: "Referrer URL"},
+      partner_id: %OpenApiSpex.Schema{
+        type: :string,
+        format: :uuid,
+        description:
+          "Explicit partner attribution (secret key auth only). Ignored for publishable key requests.",
+        nullable: true
+      },
+      referral_link_id: %OpenApiSpex.Schema{
+        type: :string,
+        format: :uuid,
+        description: "Referral link ID for partner attribution (secret key auth only)",
+        nullable: true
+      },
+      referral_click_id: %OpenApiSpex.Schema{
+        type: :string,
+        format: :uuid,
+        description: "Referral click ID for partner attribution (secret key auth only)",
+        nullable: true
+      },
       idempotency_key: %OpenApiSpex.Schema{
         type: :string,
         maxLength: 255,

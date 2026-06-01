@@ -13,6 +13,8 @@ config :good_analytics, repo: GoodAnalytics.TestRepo
 
 config :good_analytics, api_key_secret: "test-only-secret-not-for-prod!!!"
 
+config :good_analytics, referral_cookie_secret: "test-only-referral-secret!!!"
+
 # Tests opt out of background partition creation. The shared sandbox
 # would otherwise let the GenServer see in-flight inserts and emit
 # `check_violation` warnings during ConnCase tests. Suites that need

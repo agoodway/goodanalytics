@@ -222,16 +222,9 @@ defmodule GoodAnalytics.Core.IdentityResolver do
 
         merged =
           Enum.reduce(duplicates, primary, fn dup, acc ->
-            %{
-              acc
-              | fingerprints: Enum.uniq(acc.fingerprints ++ dup.fingerprints),
-                anonymous_ids: Enum.uniq(acc.anonymous_ids ++ dup.anonymous_ids),
-                click_ids: Enum.uniq(acc.click_ids ++ dup.click_ids),
-                click_id_params:
-                  Map.merge(acc.click_id_params || %{}, dup.click_id_params || %{}),
-                attribution_path:
-                  merge_attribution_paths(acc.attribution_path, dup.attribution_path)
-            }
+            acc
+            |> merge_identity_signals(dup)
+            |> merge_partner_attribution(dup)
           end)
 
         {:ok, %{merged | geo: merged_geo}}
@@ -299,6 +292,77 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   defp append_touchpoint(path, source) do
     (path ++ [Map.put(source, :timestamp, DateTime.utc_now())])
     |> cap_attribution_path()
+  end
+
+  defp merge_identity_signals(acc, dup) do
+    %{
+      acc
+      | fingerprints: Enum.uniq(acc.fingerprints ++ dup.fingerprints),
+        anonymous_ids: Enum.uniq(acc.anonymous_ids ++ dup.anonymous_ids),
+        click_ids: Enum.uniq(acc.click_ids ++ dup.click_ids),
+        click_id_params: Map.merge(acc.click_id_params || %{}, dup.click_id_params || %{}),
+        attribution_path: merge_attribution_paths(acc.attribution_path, dup.attribution_path)
+    }
+  end
+
+  # Merges partner attribution: earliest first_seen_at wins for first-touch,
+  # latest last_seen_at wins for last-touch.
+  defp merge_partner_attribution(acc, dup) do
+    acc
+    |> merge_first_partner(dup)
+    |> merge_last_partner(dup)
+  end
+
+  defp merge_first_partner(acc, dup) do
+    cond do
+      is_nil(dup.first_partner_id) ->
+        acc
+
+      is_nil(acc.first_partner_id) ->
+        %{
+          acc
+          | first_partner_id: dup.first_partner_id,
+            first_referral_link_id: dup.first_referral_link_id,
+            first_referral_click_id: dup.first_referral_click_id
+        }
+
+      DateTime.compare(acc.first_seen_at, dup.first_seen_at) == :gt ->
+        %{
+          acc
+          | first_partner_id: dup.first_partner_id,
+            first_referral_link_id: dup.first_referral_link_id,
+            first_referral_click_id: dup.first_referral_click_id
+        }
+
+      true ->
+        acc
+    end
+  end
+
+  defp merge_last_partner(acc, dup) do
+    cond do
+      is_nil(dup.last_partner_id) ->
+        acc
+
+      is_nil(acc.last_partner_id) ->
+        %{
+          acc
+          | last_partner_id: dup.last_partner_id,
+            last_referral_link_id: dup.last_referral_link_id,
+            last_referral_click_id: dup.last_referral_click_id
+        }
+
+      DateTime.compare(acc.last_seen_at, dup.last_seen_at) == :lt ->
+        %{
+          acc
+          | last_partner_id: dup.last_partner_id,
+            last_referral_link_id: dup.last_referral_link_id,
+            last_referral_click_id: dup.last_referral_click_id
+        }
+
+      true ->
+        acc
+    end
   end
 
   defp merge_attribution_paths(a, b) do

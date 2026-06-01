@@ -94,7 +94,9 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         id workspace_id fingerprints anonymous_ids click_ids ga_id
         person_external_id person_email person_name person_metadata
         first_source first_click_id first_partner_id first_seen_at
+        first_referral_link_id first_referral_click_id
         last_source last_click_id last_partner_id last_seen_at
+        last_referral_link_id last_referral_click_id
         attribution_path click_id_params geo device
         total_sessions total_pageviews total_events total_time_seconds
         avg_scroll_depth top_pages lead_quality_score fraud_risk_score
@@ -147,7 +149,11 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         link_id click_id url referrer referrer_url
         source_platform source_medium source_campaign source
         fingerprint ip_address user_agent
-        amount_cents currency properties inserted_at
+        amount_cents currency properties
+        connector_source_context
+        host path
+        partner_id referral_link_id referral_click_id
+        inserted_at
       )
 
       for col <- expected do
@@ -210,7 +216,7 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         password_hash expires_at ios_url android_url geo_targeting
         og_title og_description og_image
         total_clicks unique_clicks total_leads total_sales total_revenue_cents
-        tags external_id metadata archived_at inserted_at updated_at
+        tags external_id metadata partner_id archived_at inserted_at updated_at
       )
 
       for col <- expected do
@@ -237,6 +243,43 @@ defmodule GoodAnalytics.SchemaVerificationTest do
     test "has CHECK constraint on link_type" do
       constraints = check_constraints("ga_links")
       assert "chk_link_type" in constraints
+    end
+  end
+
+  describe "ga_partners" do
+    test "table exists with all expected columns" do
+      assert table_exists?("ga_partners")
+
+      cols = column_names("ga_partners")
+
+      expected = ~w(
+        id workspace_id key name status
+        external_id metadata archived_at inserted_at updated_at
+      )
+
+      for col <- expected do
+        assert col in cols, "Missing column: #{col}"
+      end
+    end
+
+    test "has CHECK constraint on status" do
+      constraints = check_constraints("ga_partners")
+      assert "chk_partner_status" in constraints
+    end
+
+    test "has all expected indexes" do
+      indexes = index_names("ga_partners")
+
+      expected = ~w(
+        ga_partners_pkey
+        idx_ga_partners_workspace_key
+        idx_ga_partners_workspace_external_id
+        idx_ga_partners_status
+      )
+
+      for idx <- expected do
+        assert idx in indexes, "Missing index: #{idx}"
+      end
     end
   end
 

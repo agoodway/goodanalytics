@@ -35,6 +35,9 @@ defmodule GoodAnalytics.Core.Links.Link do
     # Link type
     field(:link_type, :string, default: "short")
 
+    # Partner association (referral links)
+    field(:partner_id, Ecto.UUID)
+
     # Campaign tracking
     field(:utm_source, :string)
     field(:utm_medium, :string)
@@ -73,6 +76,7 @@ defmodule GoodAnalytics.Core.Links.Link do
   @required_fields [:domain, :key, :url, :workspace_id]
   @optional_fields [
     :link_type,
+    :partner_id,
     :utm_source,
     :utm_medium,
     :utm_campaign,
@@ -108,6 +112,7 @@ defmodule GoodAnalytics.Core.Links.Link do
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
     |> validate_inclusion(:link_type, @link_types)
+    |> validate_referral_partner()
     |> validate_url(:url)
     |> validate_url(:ios_url)
     |> validate_url(:android_url)
@@ -135,6 +140,31 @@ defmodule GoodAnalytics.Core.Links.Link do
   end
 
   def valid_http_url?(_), do: false
+
+  defp validate_referral_partner(changeset) do
+    link_type = get_field(changeset, :link_type)
+    partner_id = get_field(changeset, :partner_id)
+
+    cond do
+      # Referral links need a partner_id (on create or when changing to referral)
+      link_type == "referral" and is_nil(partner_id) and requires_partner?(changeset) ->
+        add_error(changeset, :partner_id, "is required for referral links")
+
+      # Non-referral links should not have partner_id set
+      link_type != "referral" and not is_nil(partner_id) ->
+        add_error(changeset, :partner_id, "can only be set on referral links")
+
+      true ->
+        changeset
+    end
+  end
+
+  # New links always require partner_id for referral type.
+  # Existing links only require it when link_type is being changed to referral.
+  defp requires_partner?(changeset) do
+    is_new = changeset.data.id == nil
+    is_new or get_change(changeset, :link_type) == "referral"
+  end
 
   defp validate_url(changeset, field) do
     validate_change(changeset, field, fn _, value ->

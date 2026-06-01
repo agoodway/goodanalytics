@@ -13,6 +13,7 @@ defmodule GoodAnalytics.Api.Schemas.LinkUpdateParams do
     properties: %{
       url: %OpenApiSpex.Schema{type: :string, format: :uri},
       link_type: %OpenApiSpex.Schema{type: :string, enum: ~w(short referral campaign)},
+      partner_id: %OpenApiSpex.Schema{type: :string, format: :uuid, nullable: true},
       utm_source: %OpenApiSpex.Schema{type: :string},
       utm_medium: %OpenApiSpex.Schema{type: :string},
       utm_campaign: %OpenApiSpex.Schema{type: :string},

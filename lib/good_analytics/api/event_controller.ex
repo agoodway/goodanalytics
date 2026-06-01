@@ -71,9 +71,11 @@ defmodule GoodAnalytics.Api.EventController do
     workspace_id = conn.assigns.workspace_id
     body = to_plain_map(conn.body_params)
 
+    auth_context = conn.assigns[:auth_context] || %{}
+
     with :ok <- validate_properties_count(body),
          {:ok, visitor} <- resolve_visitor(workspace_id, body),
-         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, body) do
+         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, body, auth_context) do
       Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
 
       conn
@@ -88,6 +90,7 @@ defmodule GoodAnalytics.Api.EventController do
   def batch(conn, _params) do
     workspace_id = conn.assigns.workspace_id
     %{events: events} = to_plain_map(conn.body_params)
+    auth_context = conn.assigns[:auth_context] || %{}
 
     remote_ip = conn.remote_ip
 
@@ -95,7 +98,7 @@ defmodule GoodAnalytics.Api.EventController do
       events
       |> Enum.with_index()
       |> Enum.map_reduce(MapSet.new(), fn {event_params, index}, acc ->
-        case process_single_event(workspace_id, event_params) do
+        case process_single_event(workspace_id, event_params, auth_context) do
           {:ok, _status, event, visitor_id} ->
             {%{index: index, status: "ok", event_id: event.id}, MapSet.put(acc, visitor_id)}
 
@@ -116,12 +119,12 @@ defmodule GoodAnalytics.Api.EventController do
 
   # ── Helpers ──
 
-  defp process_single_event(workspace_id, params) do
+  defp process_single_event(workspace_id, params, auth_context) do
     params = to_plain_map(params)
 
     with :ok <- validate_properties_count(params),
          {:ok, visitor} <- resolve_visitor(workspace_id, params),
-         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, params) do
+         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, params, auth_context) do
       {:ok, status, event, visitor.id}
     end
   end
@@ -198,20 +201,20 @@ defmodule GoodAnalytics.Api.EventController do
     Enum.any?([:person_external_id, :ga_id, :anonymous_id], &Map.get(params, &1))
   end
 
-  defp maybe_idempotent_record(workspace_id, visitor, params) do
+  defp maybe_idempotent_record(workspace_id, visitor, params, auth_context) do
     idempotency_key = Map.get(params, :idempotency_key)
 
     if idempotency_key do
       case Events.get_by_idempotency_key(workspace_id, idempotency_key) do
-        nil -> do_record(visitor, params, idempotency_key)
+        nil -> do_record(visitor, params, idempotency_key, auth_context)
         existing -> {:ok, 200, existing}
       end
     else
-      do_record(visitor, params, nil)
+      do_record(visitor, params, nil, auth_context)
     end
   end
 
-  defp do_record(visitor, params, idempotency_key) do
+  defp do_record(visitor, params, idempotency_key, auth_context) do
     event_type = Map.fetch!(params, :event_type)
 
     properties =
@@ -220,20 +223,42 @@ defmodule GoodAnalytics.Api.EventController do
         if idempotency_key, do: Map.put(props, "_idempotency_key", idempotency_key), else: props
       end)
 
-    attrs = %{
-      event_name: Map.get(params, :event_name),
-      amount_cents: Map.get(params, :amount_cents),
-      currency: Map.get(params, :currency),
-      url: Map.get(params, :url),
-      referrer: Map.get(params, :referrer),
-      properties: properties
-    }
+    referral_attrs = extract_referral_attrs(params, auth_context)
+
+    attrs =
+      %{
+        event_name: Map.get(params, :event_name),
+        amount_cents: Map.get(params, :amount_cents),
+        currency: Map.get(params, :currency),
+        url: Map.get(params, :url),
+        referrer: Map.get(params, :referrer),
+        properties: properties
+      }
+      |> Map.merge(referral_attrs)
 
     case Recorder.record(visitor, event_type, attrs) do
       {:ok, event} -> {:ok, 201, event}
       {:error, _changeset} -> {:error, 422, "Failed to record event"}
     end
   end
+
+  # Explicit partner_id is accepted only from secret key auth.
+  # Publishable key callers can only derive attribution from visitor state.
+  defp extract_referral_attrs(params, auth_context) do
+    trusted? = Map.get(auth_context, :key_type) == "secret"
+
+    if trusted? do
+      %{}
+      |> maybe_put(:partner_id, Map.get(params, :partner_id))
+      |> maybe_put(:referral_link_id, Map.get(params, :referral_link_id))
+      |> maybe_put(:referral_click_id, Map.get(params, :referral_click_id))
+    else
+      %{}
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp to_plain_map(%_{} = struct), do: Map.from_struct(struct)
   defp to_plain_map(%{} = map), do: map
