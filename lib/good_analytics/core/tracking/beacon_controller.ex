@@ -14,6 +14,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links, Partners}
   alias GoodAnalytics.Core.Partners.Attribution
   alias GoodAnalytics.Core.Tracking.ReferralCookie
+  alias GoodAnalytics.Core.Tracking.SourceClassifier
   alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Geo
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
@@ -37,12 +38,13 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   """
   def event(conn, params) do
     workspace_id = workspace_id(conn, params)
+    source = ga_source(conn)
 
     signals = %{
       ga_id: Map.get(params, "ga_id"),
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
       anonymous_id: Map.get(params, "anonymous_id"),
-      source: conn.assigns[:ga_source]
+      source: source
     }
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
@@ -80,7 +82,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
               %{
                 url: sanitize_url(Map.get(params, "url")),
                 referrer: sanitize_url(Map.get(params, "referrer")),
-                source: conn.assigns[:ga_source],
+                source: source,
                 properties: sanitize_properties(Map.get(params, "properties", %{})),
                 event_id: validate_event_id(Map.get(params, "event_id")),
                 fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
@@ -148,12 +150,13 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
     # Validate referral partner if this is a referral link
     referral_context = build_referral_context(link, click_id)
+    source = ga_source(conn)
 
     signals = %{
       click_id: click_id,
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
       anonymous_id: Map.get(params, "anonymous_id"),
-      source: conn.assigns[:ga_source]
+      source: source
     }
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
@@ -166,7 +169,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         click_attrs =
           %{
             click_id: click_id,
-            source: conn.assigns[:ga_source],
+            source: source,
             ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
             user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
             url: sanitize_url(Map.get(params, "url")),
@@ -216,6 +219,10 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp verify_payload_ref_token(_), do: {:error, :not_present}
+
+  # Use an upstream-assigned source (e.g. Pro's Ingest.Filter) when present;
+  # otherwise classify from this request so bare hosts still get attribution.
+  defp ga_source(conn), do: conn.assigns[:ga_source] || SourceClassifier.classify(conn)
 
   defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
        when is_binary(pid) do

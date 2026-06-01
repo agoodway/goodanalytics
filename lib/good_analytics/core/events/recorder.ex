@@ -15,6 +15,8 @@ defmodule GoodAnalytics.Core.Events.Recorder do
   alias GoodAnalytics.Connectors.{PostCommit, Signals}
   alias GoodAnalytics.Core.Events.Event
   alias GoodAnalytics.Core.Events.UrlNormalizer
+  alias GoodAnalytics.Core.Visitors
+  alias GoodAnalytics.Devices
   alias GoodAnalytics.Hooks
   alias GoodAnalytics.Maps
   alias GoodAnalytics.PubSub
@@ -80,6 +82,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
     case repo.insert(changeset, prefix: GoodAnalytics.schema_name()) do
       {:ok, event} ->
         broadcast_event(event)
+        maybe_enrich_device(visitor, attrs)
         dispatch_hook(event_type, event, visitor)
         PostCommit.maybe_dispatch(event, attrs)
         {:ok, event}
@@ -178,6 +181,18 @@ defmodule GoodAnalytics.Core.Events.Recorder do
       "good_analytics:events:#{event.workspace_id}",
       message
     )
+  end
+
+  # First-event-wins device enrichment. Best-effort: runs after the insert has
+  # committed, ignores the conditional-update result (0 rows just means already
+  # populated), and never lets an enrichment error crash record/3 or skip the
+  # downstream hook/connector dispatch.
+  defp maybe_enrich_device(visitor, attrs) do
+    ua = Map.get(attrs, :user_agent) || Map.get(attrs, "user_agent")
+    Visitors.maybe_set_device(visitor.id, Devices.parse(ua))
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # Link click hooks are sync, but from the recorder they're async

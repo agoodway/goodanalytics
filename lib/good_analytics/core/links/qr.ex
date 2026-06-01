@@ -48,7 +48,7 @@ defmodule GoodAnalytics.Core.Links.QR do
         cache_key = {:qr, domain, path_prefix, key, format, size, fg, bg, ec}
         render_opts = %{format: format, size: size, fg: fg, bg: bg, ec_level: ec_level}
 
-        case Cache.get(cache_key) do
+        case Cache.get!(cache_key) do
           nil ->
             generate_and_cache(domain, key, path_prefix, cache_key, render_opts)
 
@@ -65,7 +65,7 @@ defmodule GoodAnalytics.Core.Links.QR do
          url <- build_qr_url(domain, path_prefix, key),
          {:ok, binary} <- QRCode.create(url, ec_level) |> render(format, size, fg, bg) do
       ttl = compute_ttl(link)
-      Cache.put(cache_key, binary, ttl: ttl)
+      Cache.put!(cache_key, binary, ttl: ttl)
       {:ok, binary}
     end
   end

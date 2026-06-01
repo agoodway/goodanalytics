@@ -18,7 +18,7 @@ defmodule GoodAnalytics.Core.Funnels.Step do
     field(:label, :string)
     field(:combine, Ecto.Enum, values: [:all, :any], default: :all)
 
-    embeds_many :filters, Filter, on_replace: :delete
+    embeds_many(:filters, Filter, on_replace: :delete)
   end
 
   @kinds ~w(event url property source)

@@ -31,18 +31,18 @@ defmodule GoodAnalytics.Settings do
   def get(workspace_id, key, default \\ nil) do
     cache_key = cache_key(workspace_id, key)
 
-    case @cache.get(cache_key) do
+    case @cache.get!(cache_key) do
       @not_found ->
         default
 
       nil ->
         case fetch_from_db(workspace_id, key) do
           {:ok, value} ->
-            @cache.put(cache_key, value, ttl: ttl())
+            @cache.put!(cache_key, value, ttl: ttl())
             value
 
           :error ->
-            @cache.put(cache_key, @not_found, ttl: ttl())
+            @cache.put!(cache_key, @not_found, ttl: ttl())
             default
         end
 
@@ -77,7 +77,7 @@ defmodule GoodAnalytics.Settings do
 
     case result do
       {:ok, setting} ->
-        @cache.delete(cache_key(workspace_id, key))
+        @cache.delete!(cache_key(workspace_id, key))
         {:ok, setting}
 
       {:error, changeset} ->
@@ -96,7 +96,7 @@ defmodule GoodAnalytics.Settings do
       |> where([s], s.workspace_id == ^workspace_id and s.key == ^key)
       |> repo.delete_all(prefix: GoodAnalytics.schema_name())
 
-    @cache.delete(cache_key(workspace_id, key))
+    @cache.delete!(cache_key(workspace_id, key))
     {:ok, count}
   end
 

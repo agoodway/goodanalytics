@@ -30,7 +30,8 @@ defmodule GoodAnalytics.Core.Funnels.CohortSourceFilter do
   Used by the parent schema to discard an all-blank embed.
   """
   def blank?(%__MODULE__{} = filter) do
-    blank_value?(filter.platform) and blank_value?(filter.medium) and blank_value?(filter.campaign)
+    blank_value?(filter.platform) and blank_value?(filter.medium) and
+      blank_value?(filter.campaign)
   end
 
   def blank?(nil), do: true

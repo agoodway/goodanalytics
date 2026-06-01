@@ -65,9 +65,14 @@ defmodule GoodAnalytics.Core.Funnels.FunnelTest do
     end
 
     test "accepts 8 steps" do
-      steps = for i <- 1..8 do
-        %{kind: "event", label: "Step #{i}", filters: [%{type: "event", event_type: "pageview"}]}
-      end
+      steps =
+        for i <- 1..8 do
+          %{
+            kind: "event",
+            label: "Step #{i}",
+            filters: [%{type: "event", event_type: "pageview"}]
+          }
+        end
 
       attrs = Map.put(@valid_attrs, :steps, steps)
       changeset = Funnel.changeset(%Funnel{}, attrs)
@@ -75,9 +80,14 @@ defmodule GoodAnalytics.Core.Funnels.FunnelTest do
     end
 
     test "rejects 9 steps" do
-      steps = for i <- 1..9 do
-        %{kind: "event", label: "Step #{i}", filters: [%{type: "event", event_type: "pageview"}]}
-      end
+      steps =
+        for i <- 1..9 do
+          %{
+            kind: "event",
+            label: "Step #{i}",
+            filters: [%{type: "event", event_type: "pageview"}]
+          }
+        end
 
       attrs = Map.put(@valid_attrs, :steps, steps)
       changeset = Funnel.changeset(%Funnel{}, attrs)
@@ -117,7 +127,11 @@ defmodule GoodAnalytics.Core.Funnels.FunnelTest do
   describe "step filter validations" do
     test "event filter validates event_type against known set" do
       steps = [
-        %{kind: "event", label: "Step 1", filters: [%{type: "event", event_type: "checkout_step"}]},
+        %{
+          kind: "event",
+          label: "Step 1",
+          filters: [%{type: "event", event_type: "checkout_step"}]
+        },
         %{kind: "event", label: "Step 2", filters: [%{type: "event", event_type: "sale"}]}
       ]
 
@@ -158,7 +172,11 @@ defmodule GoodAnalytics.Core.Funnels.FunnelTest do
 
     test "property filter rejects unknown op" do
       steps = [
-        %{kind: "property", label: "Step 1", filters: [%{type: "property", key: "plan", op: "gt", value: "5"}]},
+        %{
+          kind: "property",
+          label: "Step 1",
+          filters: [%{type: "property", key: "plan", op: "gt", value: "5"}]
+        },
         %{kind: "event", label: "Step 2", filters: [%{type: "event", event_type: "sale"}]}
       ]
 

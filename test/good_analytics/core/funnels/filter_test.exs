@@ -10,7 +10,9 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "valid with event_type and event_name" do
-      changeset = Filter.changeset(%Filter{}, %{type: "event", event_type: "custom", event_name: "signup"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "event", event_type: "custom", event_name: "signup"})
+
       assert changeset.valid?
     end
 
@@ -34,12 +36,16 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "valid with starts_with" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "starts_with", value: "/blog"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "url", match: "starts_with", value: "/blog"})
+
       assert changeset.valid?
     end
 
     test "valid with regex" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "regex", value: "/posts/\\d+"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "url", match: "regex", value: "/posts/\\d+"})
+
       assert changeset.valid?
     end
 
@@ -75,22 +81,45 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "accepts scope=path" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :path, match: "equals", value: "/pricing"})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: :path,
+          match: "equals",
+          value: "/pricing"
+        })
+
       assert changeset.valid?
     end
 
     test "accepts scope=host" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :host, match: "equals", value: "acme.com"})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: :host,
+          match: "equals",
+          value: "acme.com"
+        })
+
       assert changeset.valid?
     end
 
     test "accepts scope=full_url" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: :full_url, match: "equals", value: "https://acme.com"})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: :full_url,
+          match: "equals",
+          value: "https://acme.com"
+        })
+
       assert changeset.valid?
     end
 
     test "rejects unknown scope" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", scope: "fragment", match: "equals", value: "x"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "url", scope: "fragment", match: "equals", value: "x"})
+
       refute changeset.valid?
       assert errors_on(changeset)[:scope]
     end
@@ -102,7 +131,9 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "accepts match=in with values list" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", values: ["/pricing", "/plans"]})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "url", match: "in", values: ["/pricing", "/plans"]})
+
       assert changeset.valid?
     end
 
@@ -119,7 +150,14 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "rejects match=in when both value and values present" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", value: "/pricing", values: ["/plans"]})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          match: "in",
+          value: "/pricing",
+          values: ["/plans"]
+        })
+
       refute changeset.valid?
       assert errors_on(changeset)[:value]
     end
@@ -145,45 +183,67 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "accepts match=in with value=\"\" and valid values list (empty string not exclusive)" do
-      changeset = Filter.changeset(%Filter{}, %{type: "url", match: "in", value: "", values: ["/pricing"]})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "url", match: "in", value: "", values: ["/pricing"]})
+
       assert changeset.valid?
     end
   end
 
   describe "property filter changeset" do
     test "valid with eq op" do
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: "plan", op: "eq", value: "pro"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "property", key: "plan", op: "eq", value: "pro"})
+
       assert changeset.valid?
     end
 
     test "valid with in op and values list" do
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: "plan", op: "in", values: ["pro", "enterprise"]})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "property",
+          key: "plan",
+          op: "in",
+          values: ["pro", "enterprise"]
+        })
+
       assert changeset.valid?
     end
 
     test "rejects key longer than 255 chars" do
       long_key = String.duplicate("k", 256)
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: long_key, op: "eq", value: "x"})
+
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "property", key: long_key, op: "eq", value: "x"})
+
       refute changeset.valid?
       assert errors_on(changeset)[:key]
     end
 
     test "rejects value longer than 1000 chars" do
       long_value = String.duplicate("v", 1001)
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: "k", op: "eq", value: long_value})
+
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "property", key: "k", op: "eq", value: long_value})
+
       refute changeset.valid?
       assert errors_on(changeset)[:value]
     end
 
     test "rejects values list with more than 100 items" do
       values = for i <- 1..101, do: "val#{i}"
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: "k", op: "in", values: values})
+
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "property", key: "k", op: "in", values: values})
+
       refute changeset.valid?
       assert errors_on(changeset)[:values]
     end
 
     test "rejects unknown op" do
-      changeset = Filter.changeset(%Filter{}, %{type: "property", key: "plan", op: "gt", value: "5"})
+      changeset =
+        Filter.changeset(%Filter{}, %{type: "property", key: "plan", op: "gt", value: "5"})
+
       refute changeset.valid?
       assert errors_on(changeset)[:op]
     end
@@ -212,7 +272,14 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
     end
 
     test "valid with all three fields" do
-      changeset = Filter.changeset(%Filter{}, %{type: "source", platform: "google", medium: "cpc", campaign: "spring"})
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "source",
+          platform: "google",
+          medium: "cpc",
+          campaign: "spring"
+        })
+
       assert changeset.valid?
     end
 
@@ -229,12 +296,13 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
       string_scope = Atom.to_string(filter.scope)
       assert string_scope == "host"
 
-      changeset = Filter.changeset(%Filter{}, %{
-        type: "url",
-        scope: string_scope,
-        match: "equals",
-        value: "acme.com"
-      })
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: string_scope,
+          match: "equals",
+          value: "acme.com"
+        })
 
       assert changeset.valid?
       assert Ecto.Changeset.get_field(changeset, :scope) == :host
@@ -245,12 +313,13 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
       string_scope = Atom.to_string(filter.scope)
       assert string_scope == "full_url"
 
-      changeset = Filter.changeset(%Filter{}, %{
-        type: "url",
-        scope: string_scope,
-        match: "equals",
-        value: "https://acme.com"
-      })
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: string_scope,
+          match: "equals",
+          value: "https://acme.com"
+        })
 
       assert changeset.valid?
       assert Ecto.Changeset.get_field(changeset, :scope) == :full_url
@@ -260,12 +329,13 @@ defmodule GoodAnalytics.Core.Funnels.FilterTest do
       filter = %Filter{type: "url", scope: :path, match: "equals", value: "/pricing"}
       string_scope = Atom.to_string(filter.scope)
 
-      changeset = Filter.changeset(%Filter{}, %{
-        type: "url",
-        scope: string_scope,
-        match: "equals",
-        value: "/pricing"
-      })
+      changeset =
+        Filter.changeset(%Filter{}, %{
+          type: "url",
+          scope: string_scope,
+          match: "equals",
+          value: "/pricing"
+        })
 
       assert changeset.valid?
       assert Ecto.Changeset.get_field(changeset, :scope) == :path

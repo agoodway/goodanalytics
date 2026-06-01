@@ -75,7 +75,8 @@ defmodule GoodAnalytics.Api.EventController do
 
     with :ok <- validate_properties_count(body),
          {:ok, visitor} <- resolve_visitor(workspace_id, body),
-         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, body, auth_context) do
+         {:ok, status, event} <-
+           maybe_idempotent_record(workspace_id, visitor, body, auth_context) do
       Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
 
       conn
@@ -124,7 +125,8 @@ defmodule GoodAnalytics.Api.EventController do
 
     with :ok <- validate_properties_count(params),
          {:ok, visitor} <- resolve_visitor(workspace_id, params),
-         {:ok, status, event} <- maybe_idempotent_record(workspace_id, visitor, params, auth_context) do
+         {:ok, status, event} <-
+           maybe_idempotent_record(workspace_id, visitor, params, auth_context) do
       {:ok, status, event, visitor.id}
     end
   end

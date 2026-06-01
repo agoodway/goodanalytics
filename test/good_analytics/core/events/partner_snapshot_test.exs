@@ -103,6 +103,7 @@ defmodule GoodAnalytics.Core.Events.PartnerSnapshotTest do
 
       # The original event row must be unchanged
       db_event = Events.get_by_id(event.id)
+
       assert db_event.partner_id == @partner_id,
              "event partner snapshot must not change when visitor attribution is updated"
     end

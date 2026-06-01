@@ -77,7 +77,22 @@
 
       this._setupSpaNavigation();
 
+      // A fingerprint may be supplied at init time (e.g. precomputed server-side
+      // or cached). Async sources should call setFingerprint() once ready.
+      if (this.config.fingerprint) {
+        this.setFingerprint(this.config.fingerprint);
+      }
+
       return this;
+    },
+
+    // Supply a browser fingerprint (e.g. from ThumbmarkJS) as a weak identity
+    // signal. Safe to call after init when the fingerprint resolves async; it
+    // reconciles the fingerprint to the current visitor.
+    setFingerprint: function(fp) {
+      if (!fp || this._fingerprint === fp) return;
+      this._fingerprint = fp;
+      if (this._onFingerprintReady) this._onFingerprintReady();
     },
 
     trackClientClick: function(partnerCode) {

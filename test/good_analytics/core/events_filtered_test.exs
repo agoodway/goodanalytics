@@ -65,6 +65,43 @@ defmodule GoodAnalytics.Core.EventsFilteredTest do
       assert length(results) == 2
     end
 
+    test "filters by url {:in, urls}", %{events: [pv, _sale, _lead]} do
+      results = Events.list_events(@workspace_id, url: {:in, ["https://example.com/pricing"]})
+      assert Enum.map(results, & &1.id) == [pv.id]
+    end
+
+    test "filters by url normalizing query string and trailing slash" do
+      visitor = create_visitor!()
+      ev1 = record_event!(visitor, "pageview", %{url: "https://example.com/promo?utm=x"})
+      ev2 = record_event!(visitor, "pageview", %{url: "https://example.com/promo/"})
+      _other = record_event!(visitor, "pageview", %{url: "https://example.com/elsewhere"})
+
+      results = Events.list_events(@workspace_id, url: {:in, ["https://example.com/promo"]})
+      ids = results |> Enum.map(& &1.id) |> Enum.sort()
+      assert ids == Enum.sort([ev1.id, ev2.id])
+    end
+
+    test "filters by source_campaign {:in, campaigns}" do
+      visitor = create_visitor!()
+
+      ev =
+        record_event!(visitor, "pageview", %{
+          source: %{platform: "google", campaign: "spring-sale"}
+        })
+
+      results = Events.list_events(@workspace_id, source_campaign: {:in, ["spring-sale"]})
+      assert Enum.map(results, & &1.id) == [ev.id]
+    end
+
+    test "filters by click_id {:in, ids}" do
+      visitor = create_visitor!()
+      cid = Ecto.UUID.generate()
+      ev = record_event!(visitor, "link_click", %{click_id: cid})
+
+      results = Events.list_events(@workspace_id, click_id: {:in, [cid]})
+      assert Enum.map(results, & &1.id) == [ev.id]
+    end
+
     test "filters by visitor_id", %{visitor: visitor, events: events} do
       results = Events.list_events(@workspace_id, visitor_id: visitor.id)
       assert length(results) == length(events)

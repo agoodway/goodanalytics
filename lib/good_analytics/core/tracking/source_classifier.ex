@@ -27,7 +27,7 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     "irclickid" => {:impact_radius, :affiliate}
   }
 
-  @referer_map %{
+  @base_referer_map %{
     # Social
     "facebook.com" => {:facebook, :social},
     "m.facebook.com" => {:facebook, :social},
@@ -58,11 +58,30 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     "duckduckgo.com" => {:duckduckgo, :organic},
     "yahoo.com" => {:yahoo, :organic},
     "baidu.com" => {:baidu, :organic},
-    # Email
+    # Email (webmail UIs that send a referer on click)
     "mail.google.com" => {:gmail, :email},
+    "mail.googleusercontent.com" => {:gmail, :email},
     "outlook.live.com" => {:outlook, :email},
     "outlook.office.com" => {:outlook, :email},
+    "outlook.office365.com" => {:outlook, :email},
+    "outlook.com" => {:outlook, :email},
     "mail.yahoo.com" => {:yahoo_mail, :email},
+    "mail.yahoo.co.jp" => {:yahoo_mail, :email},
+    "mail.icloud.com" => {:icloud_mail, :email},
+    "mail.aol.com" => {:aol_mail, :email},
+    "mail.proton.me" => {:proton_mail, :email},
+    "mail.zoho.com" => {:zoho_mail, :email},
+    "mail.gmx.com" => {:gmx, :email},
+    "mail.gmx.net" => {:gmx, :email},
+    "mail.gmx.de" => {:gmx, :email},
+    "mail.web.de" => {:web_de, :email},
+    "e.mail.ru" => {:mailru, :email},
+    "mail.yandex.ru" => {:yandex_mail, :email},
+    "mail.yandex.com" => {:yandex_mail, :email},
+    "mail.naver.com" => {:naver_mail, :email},
+    "app.fastmail.com" => {:fastmail, :email},
+    "mail.tutanota.com" => {:tuta, :email},
+    "app.hey.com" => {:hey, :email},
     # Messaging
     "web.whatsapp.com" => {:whatsapp, :messaging},
     "web.telegram.org" => {:telegram, :messaging},
@@ -70,6 +89,77 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     "app.slack.com" => {:slack, :messaging},
     "discord.com" => {:discord, :messaging}
   }
+
+  # AI assistant referrers (research-documented; medium :ai). Each host maps to a
+  # canonical vendor so the referer and utm_source paths agree. Extensible at
+  # runtime via the `:overrides` option.
+  @ai_referer_map %{
+    "chatgpt.com" => {:chatgpt, :ai},
+    "chat.openai.com" => {:chatgpt, :ai},
+    "chat-gpt.org" => {:chatgpt, :ai},
+    "openai.com" => {:chatgpt, :ai},
+    "claude.ai" => {:claude, :ai},
+    "anthropic.com" => {:claude, :ai},
+    "perplexity.ai" => {:perplexity, :ai},
+    "copilot.microsoft.com" => {:copilot, :ai},
+    "edgeservices.bing.com" => {:copilot, :ai},
+    "turing.microsoft.com" => {:copilot, :ai},
+    "cosmos.microsoft.com" => {:copilot, :ai},
+    "gemini.google.com" => {:gemini, :ai},
+    "bard.google.com" => {:gemini, :ai},
+    "deepmind.com" => {:gemini, :ai},
+    "grok.com" => {:grok, :ai},
+    "grok.x.com" => {:grok, :ai},
+    "x.ai" => {:grok, :ai},
+    "deepseek.com" => {:deepseek, :ai},
+    "you.com" => {:you, :ai},
+    "meta.ai" => {:meta_ai, :ai},
+    "mistral.ai" => {:mistral, :ai},
+    "chat.mistral.ai" => {:mistral, :ai},
+    "character.ai" => {:character_ai, :ai},
+    "huggingface.co" => {:huggingchat, :ai},
+    "huggingchat.com" => {:huggingchat, :ai},
+    "phind.com" => {:phind, :ai},
+    "pi.ai" => {:pi, :ai},
+    "zhipu.ai" => {:zhipu, :ai},
+    "chatglm.cn" => {:zhipu, :ai},
+    "qwenlm.ai" => {:qwen, :ai},
+    "chat.qwen.ai" => {:qwen, :ai},
+    "felo.ai" => {:felo, :ai},
+    "komo.ai" => {:komo, :ai},
+    "iask.ai" => {:iask, :ai},
+    "sider.ai" => {:sider, :ai},
+    "venice.ai" => {:venice, :ai},
+    "duck.ai" => {:duckai, :ai},
+    "cohere.ai" => {:cohere, :ai},
+    "jasper.ai" => {:jasper, :ai},
+    "writesonic.com" => {:writesonic, :ai},
+    "quillbot.com" => {:quillbot, :ai},
+    "wordtune.com" => {:wordtune, :ai},
+    "copy.ai" => {:copyai, :ai},
+    "blackbox.ai" => {:blackbox, :ai},
+    "openchat.so" => {:openchat, :ai},
+    "open-assistant.io" => {:open_assistant, :ai},
+    "openrouter.ai" => {:openrouter, :ai},
+    "lmarena.ai" => {:lmarena, :ai},
+    "coze.com" => {:coze, :ai},
+    "exa.ai" => {:exa, :ai},
+    "forefront.ai" => {:forefront, :ai},
+    "reka.ai" => {:reka, :ai},
+    "ai21.com" => {:ai21, :ai},
+    "deepl.com" => {:deepl, :ai},
+    "chat.suno.com" => {:suno, :ai},
+    "neeva.com" => {:neeva, :ai},
+    "nimble.ai" => {:nimble, :ai},
+    "bnngpt.com" => {:bnngpt, :ai},
+    "firefly.adobe.com" => {:adobe_firefly, :ai}
+  }
+
+  @referer_map Map.merge(@base_referer_map, @ai_referer_map)
+
+  # Canonical platform per AI domain, for matching `utm_source` values that
+  # arrive without a referrer (e.g. ?utm_source=chatgpt.com).
+  @ai_sources Map.new(@ai_referer_map, fn {host, {platform, _medium}} -> {host, platform} end)
 
   @doc """
   Classifies the source of an inbound request.
@@ -169,15 +259,29 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     utms = Map.take(params, ~w(utm_source utm_medium utm_campaign utm_content utm_term))
 
     if map_size(utms) > 0 do
+      raw_source = Map.get(utms, "utm_source")
+      ai_platform = ai_source_platform(raw_source)
+
       %{
-        platform: Map.get(utms, "utm_source"),
-        medium: normalize_medium(Map.get(utms, "utm_medium", "unknown")),
+        platform: ai_platform || raw_source,
+        medium:
+          if(ai_platform,
+            do: :ai,
+            else: normalize_medium(Map.get(utms, "utm_medium", "unknown"))
+          ),
         campaign: Map.get(utms, "utm_campaign"),
         content: Map.get(utms, "utm_content"),
         term: Map.get(utms, "utm_term"),
         confidence: :medium
       }
     end
+  end
+
+  # Maps a known AI `utm_source` domain to its canonical platform (`nil` otherwise).
+  defp ai_source_platform(nil), do: nil
+
+  defp ai_source_platform(source) when is_binary(source) do
+    Map.get(@ai_sources, source |> String.downcase() |> String.replace_prefix("www.", ""))
   end
 
   defp classify_referer(nil, _ref_map),

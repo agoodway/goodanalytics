@@ -57,4 +57,23 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
       assert {:ok, _} = Ecto.UUID.cast(event.id)
     end
   end
+
+  describe "source self-classification (no upstream ga_source)" do
+    test "an event from an AI referrer is recorded with source_medium=ai" do
+      conn =
+        build_event_conn()
+        |> Plug.Conn.put_req_header("referer", "https://chatgpt.com/")
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-ai-#{System.unique_integer([:positive])}",
+          "url" => "https://site.test/jobs"
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.source_medium == "ai"
+      assert event.source_platform == "chatgpt"
+    end
+  end
 end
