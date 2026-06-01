@@ -74,6 +74,45 @@ defmodule GoodAnalytics.Core.Events.EventTest do
       changeset = Event.changeset(%Event{}, attrs)
       assert changeset.valid?
     end
+
+    test "truncates oversized source strings instead of rejecting the event" do
+      long = String.duplicate("a", 1_000)
+
+      attrs =
+        Map.merge(@valid_attrs, %{
+          source_platform: long,
+          source_medium: long,
+          source_campaign: long,
+          source: %{"term" => long, "content" => long}
+        })
+
+      changeset = Event.changeset(%Event{}, attrs)
+
+      # The event must still be valid — ingest events are never dropped.
+      assert changeset.valid?
+
+      assert String.length(Ecto.Changeset.get_change(changeset, :source_platform)) == 255
+      assert String.length(Ecto.Changeset.get_change(changeset, :source_medium)) == 255
+      assert String.length(Ecto.Changeset.get_change(changeset, :source_campaign)) == 255
+
+      source = Ecto.Changeset.get_change(changeset, :source)
+      assert String.length(source["term"]) == 255
+      assert String.length(source["content"]) == 255
+    end
+
+    test "leaves source strings within the cap untouched" do
+      attrs =
+        Map.merge(@valid_attrs, %{
+          source_platform: "google",
+          source_medium: "organic",
+          source: %{"term" => "analytics"}
+        })
+
+      changeset = Event.changeset(%Event{}, attrs)
+
+      assert Ecto.Changeset.get_change(changeset, :source_platform) == "google"
+      assert Ecto.Changeset.get_change(changeset, :source) == %{"term" => "analytics"}
+    end
   end
 
   defp errors_on(changeset) do

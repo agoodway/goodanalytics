@@ -91,6 +91,36 @@ defmodule GoodAnalytics.Core.VisitorsDBTest do
     end
   end
 
+  describe "maybe_set_device/2" do
+    test "sets device when empty" do
+      visitor = create_visitor!()
+
+      assert {:ok, 1} =
+               Visitors.maybe_set_device(visitor.id, %{"type" => "desktop", "browser" => "Chrome"})
+
+      assert Visitors.get_visitor(visitor.id).device == %{
+               "type" => "desktop",
+               "browser" => "Chrome"
+             }
+    end
+
+    test "does not overwrite an existing device (first-event-wins)" do
+      visitor = create_visitor!(%{device: %{"type" => "desktop"}})
+      assert {:ok, 0} = Visitors.maybe_set_device(visitor.id, %{"type" => "smartphone"})
+      assert Visitors.get_visitor(visitor.id).device == %{"type" => "desktop"}
+    end
+
+    test "is a noop for an empty map" do
+      visitor = create_visitor!()
+      assert :noop = Visitors.maybe_set_device(visitor.id, %{})
+    end
+
+    test "returns not_found for a missing visitor" do
+      assert {:error, :not_found} =
+               Visitors.maybe_set_device(Uniq.UUID.uuid7(), %{"type" => "desktop"})
+    end
+  end
+
   describe "get_by_external_id/2" do
     test "returns visitor by workspace_id and person_external_id" do
       visitor = create_visitor!(%{person_external_id: "cust_1", status: "identified"})

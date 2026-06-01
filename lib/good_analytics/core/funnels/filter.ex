@@ -128,7 +128,11 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
     value = get_field(changeset, :value)
 
     if is_binary(value) and value != "" do
-      add_error(changeset, :value, "value and values are mutually exclusive for url 'in' match mode")
+      add_error(
+        changeset,
+        :value,
+        "value and values are mutually exclusive for url 'in' match mode"
+      )
     else
       changeset
     end
@@ -199,7 +203,11 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
     campaign = get_field(changeset, :campaign)
 
     if is_nil(platform) and is_nil(medium) and is_nil(campaign) do
-      add_error(changeset, :type, "source filter must specify at least one of platform, medium, or campaign")
+      add_error(
+        changeset,
+        :type,
+        "source filter must specify at least one of platform, medium, or campaign"
+      )
     else
       changeset
     end

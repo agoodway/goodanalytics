@@ -108,6 +108,12 @@ defmodule GoodAnalytics.Core.Events.Event do
     :connector_source_context
   ]
 
+  # Cap on free-form source-classification strings. They derive from
+  # client-controlled `utm_*` params with no upstream length bound, so we
+  # truncate (never reject — ingest events are append-only and must not be
+  # dropped) to keep the columns and breakdown outputs from being bloated.
+  @max_source_field_length 255
+
   @doc """
   Changeset for recording an event.
   """
@@ -118,5 +124,24 @@ defmodule GoodAnalytics.Core.Events.Event do
     |> validate_inclusion(:event_type, @event_types)
     |> validate_length(:host, max: 2083)
     |> validate_length(:path, max: 2083)
+    |> truncate_source_fields()
   end
+
+  defp truncate_source_fields(changeset) do
+    changeset
+    |> update_change(:source_platform, &truncate_source_value/1)
+    |> update_change(:source_medium, &truncate_source_value/1)
+    |> update_change(:source_campaign, &truncate_source_value/1)
+    |> update_change(:source, &truncate_source_map/1)
+  end
+
+  defp truncate_source_value(value) when is_binary(value),
+    do: String.slice(value, 0, @max_source_field_length)
+
+  defp truncate_source_value(value), do: value
+
+  defp truncate_source_map(%{} = source),
+    do: Map.new(source, fn {key, value} -> {key, truncate_source_value(value)} end)
+
+  defp truncate_source_map(source), do: source
 end

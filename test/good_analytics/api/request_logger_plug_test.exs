@@ -115,9 +115,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
   describe "before_send callback — error handling" do
     test "task failure does not affect response" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(workspace_id: fn _conn -> raise "workspace boom" end)
-        )
+        RequestLoggerPlug.init(valid_opts(workspace_id: fn _conn -> raise "workspace boom" end))
 
       conn = build_conn("POST", "/api/v1/widgets")
 
@@ -137,9 +135,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "TaskSupervisor unavailable is logged gracefully" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(task_supervisor: :nonexistent_supervisor)
-        )
+        RequestLoggerPlug.init(valid_opts(task_supervisor: :nonexistent_supervisor))
 
       conn = build_conn("POST", "/api/v1/widgets")
 
@@ -158,9 +154,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "workspace_id callback returning nil logs error" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(workspace_id: fn _conn -> nil end)
-        )
+        RequestLoggerPlug.init(valid_opts(workspace_id: fn _conn -> nil end))
 
       conn = build_conn("POST", "/api/v1/widgets")
 
@@ -178,9 +172,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "workspace_id callback returning non-UUID string logs error" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(workspace_id: fn _conn -> "not-a-uuid" end)
-        )
+        RequestLoggerPlug.init(valid_opts(workspace_id: fn _conn -> "not-a-uuid" end))
 
       conn = build_conn("POST", "/api/v1/widgets")
 
@@ -198,9 +190,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "identity callback returning invalid value logs error" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(identity: fn _conn -> "not_a_map" end)
-        )
+        RequestLoggerPlug.init(valid_opts(identity: fn _conn -> "not_a_map" end))
 
       conn = build_conn("GET", "/api/v1/widgets")
 
@@ -241,9 +231,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "path callback returning non-binary logs error" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(path: fn _conn -> 42 end)
-        )
+        RequestLoggerPlug.init(valid_opts(path: fn _conn -> 42 end))
 
       conn = build_conn("GET", "/api/v1/widgets/secret-123")
 
@@ -261,9 +249,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "properties callback returning non-map logs error" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(properties: fn _conn -> "not_a_map" end)
-        )
+        RequestLoggerPlug.init(valid_opts(properties: fn _conn -> "not_a_map" end))
 
       conn = build_conn("GET", "/api/v1/widgets")
 
@@ -295,9 +281,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlugTest do
 
     test "optional path callback redacts path in event" do
       opts =
-        RequestLoggerPlug.init(
-          valid_opts(path: fn _conn -> "/api/v1/widgets/:id" end)
-        )
+        RequestLoggerPlug.init(valid_opts(path: fn _conn -> "/api/v1/widgets/:id" end))
 
       conn = build_conn("GET", "/api/v1/widgets/secret-123")
       result = RequestLoggerPlug.call(conn, opts)

@@ -70,11 +70,11 @@ defmodule GoodAnalytics.Core.Links.QRTest do
       link = create_link!(%{domain: "test.link", url: "https://example.com"})
 
       cache_key = {:qr, "test.link", "", link.key, :svg, 10, "000000", "ffffff", "low"}
-      assert Cache.get(cache_key) == nil
+      assert Cache.get!(cache_key) == nil
 
       assert {:ok, _svg} = QR.generate("test.link", link.key)
 
-      assert Cache.get(cache_key) != nil
+      assert Cache.get!(cache_key) != nil
     end
 
     test "returns {:error, :invalid_ec} for invalid ec level" do

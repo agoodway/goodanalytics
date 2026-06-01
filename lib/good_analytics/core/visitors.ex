@@ -145,6 +145,36 @@ defmodule GoodAnalytics.Core.Visitors do
   end
 
   @doc """
+  Populates `visitor.device` for `visitor_id` if and only if the current value is
+  empty (first-event-wins), mirroring `maybe_set_geo/2`. Device parsing is
+  synchronous, so this is called inline at ingest rather than via async enqueue.
+
+  Returns `{:ok, count}` (`1` set, `0` already populated), `:noop` for empty
+  input, or `{:error, :not_found}` when the visitor does not exist.
+  """
+  @spec maybe_set_device(Ecto.UUID.t(), map()) ::
+          {:ok, 0 | 1} | :noop | {:error, :not_found}
+  def maybe_set_device(_visitor_id, device) when not is_map(device) or map_size(device) == 0,
+    do: :noop
+
+  def maybe_set_device(visitor_id, device) when is_map(device) do
+    repo = Repo.repo()
+
+    query =
+      from(v in Visitor,
+        where: v.id == ^visitor_id,
+        where: fragment("? = '{}'::jsonb OR ? IS NULL", v.device, v.device)
+      )
+
+    case repo.update_all(query, [set: [device: device, updated_at: DateTime.utc_now()]],
+           prefix: GoodAnalytics.schema_name()
+         ) do
+      {1, _} -> {:ok, 1}
+      {0, _} -> if get_visitor(visitor_id), do: {:ok, 0}, else: {:error, :not_found}
+    end
+  end
+
+  @doc """
   Removes all PII, events, and identity signals for a visitor (GDPR forget).
 
   Clears all identifying fields and deletes associated events.

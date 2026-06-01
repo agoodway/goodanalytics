@@ -74,7 +74,8 @@ defmodule GoodAnalytics.Core.Links.Redirect do
             link: link,
             click_id: click_id,
             source: source,
-            qr: qr
+            qr: qr,
+            params: conn.query_params
           },
           visitor
         )
@@ -300,7 +301,7 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   end
 
   @excluded_passthrough_params MapSet.new(~w(
-    ga_id via ref qr
+    ga_id via ref qr s
     gclid gbraid wbraid msclkid fbclid ttclid twclid
     li_fat_id sccid dclid epik irclickid
   ))

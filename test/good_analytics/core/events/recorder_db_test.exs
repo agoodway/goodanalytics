@@ -3,6 +3,7 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
 
   alias GoodAnalytics.Core.Events
   alias GoodAnalytics.Core.Events.{Event, Recorder}
+  alias GoodAnalytics.Core.Visitors
 
   describe "record/3" do
     test "inserts event with workspace_id and visitor_id from visitor" do
@@ -253,6 +254,45 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
 
     test "returns {:ok, 0} for invalid click_id" do
       assert {:ok, 0} = Recorder.backfill_link_click_fingerprint("not-a-uuid", "fp_test")
+    end
+  end
+
+  describe "device enrichment" do
+    @desktop_ua "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " <>
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    @iphone_ua "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " <>
+                 "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+
+    test "populates visitor.device from the event user agent" do
+      visitor = create_visitor!()
+
+      assert {:ok, _event} =
+               Recorder.record(visitor, "pageview", %{
+                 url: "https://x.test",
+                 user_agent: @desktop_ua
+               })
+
+      device = Visitors.get_visitor(visitor.id).device
+      assert device["type"] == "desktop"
+      assert device["browser"] == "Chrome"
+    end
+
+    test "does not overwrite device on a later event (first-event-wins)" do
+      visitor = create_visitor!()
+
+      {:ok, _} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test", user_agent: @desktop_ua})
+
+      {:ok, _} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test", user_agent: @iphone_ua})
+
+      assert Visitors.get_visitor(visitor.id).device["type"] == "desktop"
+    end
+
+    test "leaves device empty when the event has no user agent" do
+      visitor = create_visitor!()
+      {:ok, _} = Recorder.record(visitor, "pageview", %{url: "https://x.test"})
+      assert Visitors.get_visitor(visitor.id).device == %{}
     end
   end
 end

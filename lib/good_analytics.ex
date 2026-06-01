@@ -116,7 +116,8 @@ defmodule GoodAnalytics do
     do: Partners.list_partners(workspace_id, opts)
 
   @doc "Update a partner, scoped to a workspace."
-  def update_partner(workspace_id, id, attrs), do: Partners.update_partner(workspace_id, id, attrs)
+  def update_partner(workspace_id, id, attrs),
+    do: Partners.update_partner(workspace_id, id, attrs)
 
   @doc "Archive a partner, scoped to a workspace."
   def archive_partner(workspace_id, id), do: Partners.archive_partner(workspace_id, id)

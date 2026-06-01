@@ -12,7 +12,8 @@ defmodule GoodAnalytics.Api.Schemas.PartnerParams do
     properties: %{
       key: %OpenApiSpex.Schema{
         type: :string,
-        description: "Unique partner key within the workspace (letters, numbers, hyphens, underscores)"
+        description:
+          "Unique partner key within the workspace (letters, numbers, hyphens, underscores)"
       },
       name: %OpenApiSpex.Schema{type: :string, description: "Display name for the partner"},
       status: %OpenApiSpex.Schema{

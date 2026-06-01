@@ -211,6 +211,101 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifierTest do
     end
   end
 
+  describe "classify/2 AI referrals" do
+    test "classifies known AI referrer hosts as :ai with a canonical platform" do
+      for {referer, platform} <- [
+            {"https://chatgpt.com/", :chatgpt},
+            {"https://chat.openai.com/", :chatgpt},
+            {"https://www.perplexity.ai/", :perplexity},
+            {"https://claude.ai/", :claude},
+            {"https://copilot.microsoft.com/", :copilot},
+            {"https://gemini.google.com/", :gemini}
+          ] do
+        result = classify_with_referer(referer)
+        assert result.medium == :ai, "#{referer} should be :ai"
+        assert result.platform == platform, "#{referer} should be #{platform}"
+      end
+    end
+
+    test "recognizes an AI utm_source even with no referrer (stripped-referrer case)" do
+      result = classify_params(%{"utm_source" => "chatgpt.com"})
+      assert result.medium == :ai
+      assert result.platform == :chatgpt
+    end
+
+    test "recognizes AI utm_source across vendors and normalizes www./case" do
+      for {source, platform} <- [
+            {"perplexity.ai", :perplexity},
+            {"claude.ai", :claude},
+            {"www.perplexity.ai", :perplexity},
+            {"ChatGPT.com", :chatgpt}
+          ] do
+        result = classify_params(%{"utm_source" => source})
+        assert result.medium == :ai, "utm_source=#{source} should be :ai"
+        assert result.platform == platform, "utm_source=#{source} should be #{platform}"
+      end
+    end
+
+    test "an AI utm_source outranks a non-AI referer (UTM > referer)" do
+      result =
+        SourceClassifier.classify(%{
+          query_params: %{"utm_source" => "perplexity.ai"},
+          referer: "https://facebook.com/"
+        })
+
+      assert result.medium == :ai
+      assert result.platform == :perplexity
+    end
+
+    test "a paid click ID outranks an AI referer (click ID > referer)" do
+      result =
+        SourceClassifier.classify(%{
+          query_params: %{"gclid" => "g_val"},
+          referer: "https://chatgpt.com/"
+        })
+
+      # The paid click wins platform + confidence; the AI referer must not
+      # downgrade an attributable paid visit to :ai.
+      assert result.platform == :google_ads
+      assert result.medium == :paid
+      assert result.confidence == :high
+    end
+
+    test "canonicalizes openai and chatgpt.com to the same platform" do
+      a = classify_with_referer("https://chat.openai.com/x")
+      b = classify_with_referer("https://chatgpt.com/y")
+      assert a.platform == b.platform
+    end
+
+    test "a non-AI referrer is unaffected" do
+      result = classify_with_referer("https://example.com/")
+      assert result.medium == :referral
+    end
+  end
+
+  describe "classify/2 webmail referrals" do
+    test "classifies known webmail hosts as :email with a canonical platform" do
+      for {referer, platform} <- [
+            {"https://mail.google.com/", :gmail},
+            {"https://outlook.live.com/", :outlook},
+            {"https://outlook.office365.com/", :outlook},
+            {"https://mail.yahoo.com/", :yahoo_mail},
+            {"https://mail.proton.me/", :proton_mail},
+            {"https://app.fastmail.com/", :fastmail}
+          ] do
+        result = classify_with_referer(referer)
+        assert result.medium == :email, "#{referer} should be :email"
+        assert result.platform == platform, "#{referer} should be #{platform}"
+      end
+    end
+
+    test "a webmail host is distinguished from the same provider's search host" do
+      # yahoo.com is organic search; mail.yahoo.com is an email client.
+      assert classify_with_referer("https://yahoo.com/").medium == :organic
+      assert classify_with_referer("https://mail.yahoo.com/").medium == :email
+    end
+  end
+
   # Helpers
 
   defp classify_params(params) do

@@ -26,11 +26,13 @@ defmodule GoodAnalytics.Api.Schemas.EventParams do
       },
       person_email: %OpenApiSpex.Schema{
         type: :string,
-        description: "Person's email address. Used for identification when visitor is resolved via signals."
+        description:
+          "Person's email address. Used for identification when visitor is resolved via signals."
       },
       person_phone: %OpenApiSpex.Schema{
         type: :string,
-        description: "Person's phone number. Used for identification when visitor is resolved via signals."
+        description:
+          "Person's phone number. Used for identification when visitor is resolved via signals."
       },
       ga_id: %OpenApiSpex.Schema{
         type: :string,

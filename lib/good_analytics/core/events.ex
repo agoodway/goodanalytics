@@ -5,8 +5,10 @@ defmodule GoodAnalytics.Core.Events do
 
   alias GoodAnalytics.Core.Events.Event
   alias GoodAnalytics.Repo
+  alias GoodAnalytics.SQL
 
   import Ecto.Query
+  import GoodAnalytics.SQL, only: [normalized_url: 1]
 
   @default_limit 50
   @default_window_days 7
@@ -19,6 +21,9 @@ defmodule GoodAnalytics.Core.Events do
 
     * `:event_type` — `{:in, list}` or `{:not_in, list}` for multi-select filtering
     * `:source_platform` — `{:in, list}` or `{:not_in, list}` for multi-select filtering
+    * `:source_campaign` — `{:in, list}` or `{:not_in, list}` for multi-select filtering
+    * `:url` — `{:in, list}` or `{:not_in, list}` for multi-select filtering
+    * `:click_id` — `{:in, list}` or `{:not_in, list}` for multi-select filtering
     * `:visitor_id` — exact match on visitor_id
     * `:search` — ILIKE search across event_name and url
     * `:start_at` — lower bound for inserted_at (defaults to 7 days ago)
@@ -61,11 +66,16 @@ defmodule GoodAnalytics.Core.Events do
   Scans events from the last 90 days to keep the query partition-safe.
   Used to populate multi-select filter options.
   """
-  @spec filter_options(Ecto.UUID.t()) :: %{event_types: [String.t()], source_platforms: [String.t()]}
+  @spec filter_options(Ecto.UUID.t()) :: %{
+          event_types: [String.t()],
+          source_platforms: [String.t()]
+        }
   def filter_options(workspace_id) do
     repo = Repo.repo()
     prefix = GoodAnalytics.schema_name()
-    since = DateTime.add(DateTime.utc_now(), -@filter_options_window_days * @seconds_per_day, :second)
+
+    since =
+      DateTime.add(DateTime.utc_now(), -@filter_options_window_days * @seconds_per_day, :second)
 
     event_types =
       from(e in Event,
@@ -129,6 +139,9 @@ defmodule GoodAnalytics.Core.Events do
     )
     |> maybe_filter_event_type(opts[:event_type])
     |> maybe_filter_source_platform(opts[:source_platform])
+    |> maybe_filter_source_campaign(opts[:source_campaign])
+    |> maybe_filter_url(opts[:url])
+    |> maybe_filter_click_id(opts[:click_id])
     |> maybe_filter_visitor_id(opts[:visitor_id])
     |> maybe_filter_search(opts[:search])
   end
@@ -160,6 +173,33 @@ defmodule GoodAnalytics.Core.Events do
 
   defp maybe_filter_source_platform(query, _), do: query
 
+  defp maybe_filter_source_campaign(query, {:in, campaigns}) when is_list(campaigns),
+    do: where(query, [e], e.source_campaign in ^campaigns)
+
+  defp maybe_filter_source_campaign(query, {:not_in, campaigns}) when is_list(campaigns),
+    do: where(query, [e], e.source_campaign not in ^campaigns)
+
+  defp maybe_filter_source_campaign(query, _), do: query
+
+  # Matches the normalized URL (query string / trailing slash collapsed) so a
+  # filter drilled from a page-level breakdown row resolves the same events the
+  # row counted.
+  defp maybe_filter_url(query, {:in, urls}) when is_list(urls),
+    do: where(query, [e], normalized_url(e.url) in ^urls)
+
+  defp maybe_filter_url(query, {:not_in, urls}) when is_list(urls),
+    do: where(query, [e], normalized_url(e.url) not in ^urls)
+
+  defp maybe_filter_url(query, _), do: query
+
+  defp maybe_filter_click_id(query, {:in, ids}) when is_list(ids),
+    do: where(query, [e], e.click_id in ^ids)
+
+  defp maybe_filter_click_id(query, {:not_in, ids}) when is_list(ids),
+    do: where(query, [e], e.click_id not in ^ids)
+
+  defp maybe_filter_click_id(query, _), do: query
+
   defp maybe_filter_visitor_id(query, nil), do: query
   defp maybe_filter_visitor_id(query, ""), do: query
 
@@ -173,12 +213,8 @@ defmodule GoodAnalytics.Core.Events do
 
   defp maybe_filter_search(query, search) do
     search = String.slice(search, 0, @max_search_length)
-    pattern = "%#{escape_like(search)}%"
+    pattern = "%#{SQL.escape_like(search)}%"
     where(query, [e], ilike(e.event_name, ^pattern) or ilike(e.url, ^pattern))
-  end
-
-  defp escape_like(term) do
-    String.replace(term, ["\\", "%", "_"], fn c -> "\\" <> c end)
   end
 
   @doc """
