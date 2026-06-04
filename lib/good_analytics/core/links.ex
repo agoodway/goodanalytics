@@ -89,6 +89,47 @@ defmodule GoodAnalytics.Core.Links do
     end
   end
 
+  @doc "Gets all non-archived links that share a key, across every domain."
+  def get_links_by_key(key) do
+    repo = Repo.repo()
+
+    from(l in Link,
+      where: l.key == ^key,
+      where: is_nil(l.archived_at)
+    )
+    |> repo.all(prefix: GoodAnalytics.schema_name())
+  end
+
+  @doc """
+  Resolves a live (non-archived, non-expired) link by key alone, ignoring domain.
+
+  Useful when the public host is unavailable at redirect time — e.g. behind a
+  CDN/edge proxy that rewrites the `Host` header, or when the short-link domain
+  differs from the backend host. Keys are globally unique in practice, but the
+  `(domain, key)` schema permits the same key under different domains, so this
+  returns `{:error, :ambiguous}` when more than one *live* link shares the key.
+
+  Returns `{:ok, link}`, `{:error, :not_found}`, `{:error, :expired}`, or
+  `{:error, :ambiguous}`.
+  """
+  def resolve_live_link_by_key(key) do
+    case get_links_by_key(key) do
+      [] -> {:error, :not_found}
+      [link] -> live_link_result(link)
+      links -> resolve_ambiguous_by_key(links)
+    end
+  end
+
+  defp resolve_ambiguous_by_key(links) do
+    case Enum.filter(links, &live_link?/1) do
+      [link] -> {:ok, link}
+      [] -> {:error, :expired}
+      _ -> {:error, :ambiguous}
+    end
+  end
+
+  defp live_link?(link), do: match?({:ok, _}, live_link_result(link))
+
   @doc "Lists links for a workspace with optional filters."
   def list_links(workspace_id, opts \\ []) do
     repo = Repo.repo()
