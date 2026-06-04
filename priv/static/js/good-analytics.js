@@ -12,6 +12,10 @@
       cookieName: '_ga_good',
       identityStorageKey: '_ga_good_id',
       anonCookieName: '_ga_anon',
+      clientAnonymousId: false,
+      clientAnonCookieName: '_ga_good_anon',
+      anonStorageKey: '_ga_good_anon_id',
+      fingerprintStorageKey: '_ga_good_fp',
       refCookieName: '_ga_ref',
       cookieDays: 90,
       queryParam: 'ga_id',
@@ -70,6 +74,15 @@
         if (modules[i].init) modules[i].init(this);
       }
 
+      // Establish a durable client anonymous id when enabled (static/SaaS deploys
+      // with no server-side _ga_anon cookie). Must run before the first beacon.
+      if (this.config.clientAnonymousId) this._ensureAnonymousId();
+
+      // Hydrate a cached fingerprint synchronously so a returning visitor's first
+      // pageview carries it (the live ThumbmarkJS compute is async and usually
+      // resolves after the pageview beacon). First-ever visits reconcile later.
+      this._hydrateFingerprint();
+
       // Auto-track pageview after init
       if (this.config.autoPageview !== false) {
         this.track('pageview');
@@ -92,7 +105,17 @@
     setFingerprint: function(fp) {
       if (!fp || this._fingerprint === fp) return;
       this._fingerprint = fp;
+      // Cache so the next page load can hydrate it synchronously before the pageview.
+      this.setStorage(this.config.fingerprintStorageKey, fp);
       if (this._onFingerprintReady) this._onFingerprintReady();
+    },
+
+    // Load a previously-cached fingerprint synchronously. Sets `_fingerprint`
+    // directly (does NOT trigger a reconcile) — the value was already known.
+    _hydrateFingerprint: function() {
+      if (this._fingerprint) return;
+      var fp = this.getStorage(this.config.fingerprintStorageKey);
+      if (fp) this._fingerprint = fp;
     },
 
     trackClientClick: function(partnerCode) {
@@ -137,7 +160,7 @@
         event_id: this._uuidv4(),
         event_type: eventType,
         ga_id: this.getIdentity(),
-        anonymous_id: this.getCookie(this.config.anonCookieName),
+        anonymous_id: this.getAnonymousId(),
         url: window.location.href,
         referrer: document.referrer,
         timestamp: new Date().toISOString()
@@ -188,6 +211,41 @@
       return id;
     },
 
+    // Mint (once) and persist a durable, client-side anonymous id. Stored in both
+    // localStorage (durable) and a non-HttpOnly first-party cookie (so host
+    // form/API code can read it). Uses a distinct key from the server-owned
+    // _ga_anon cookie so the two never collide.
+    _ensureAnonymousId: function() {
+      var id = this.getStorage(this.config.anonStorageKey)
+            || this.getCookie(this.config.clientAnonCookieName);
+      if (!id) {
+        id = this._uuidv4(); // null if no CSPRNG; skip silently
+        if (id) {
+          this.setStorage(this.config.anonStorageKey, id);
+          this.setCookie(this.config.clientAnonCookieName, id, this.config.cookieDays);
+        }
+      }
+      this._anonymousId = id;
+    },
+
+    getAnonymousId: function() {
+      return this._anonymousId
+          || this.getStorage(this.config.anonStorageKey)
+          || this.getCookie(this.config.clientAnonCookieName)
+          || this.getCookie(this.config.anonCookieName)
+          || null;
+    },
+
+    getFingerprint: function() { return this._fingerprint || null; },
+
+    getSignals: function() {
+      return {
+        ga_id: this.getIdentity(),
+        anonymous_id: this.getAnonymousId(),
+        fingerprint: this._fingerprint || null
+      };
+    },
+
     forget: function() {
       this.deleteCookie(this.config.cookieName);
       this.deleteCookie(this.config.anonCookieName);
@@ -198,7 +256,11 @@
     _sendFingerprintReconcile: function() {
       if (this._fingerprintReconcileSent) return;
       var gaId = this.getIdentity();
-      if (!gaId || !this._fingerprint) return;
+      var anonId = this.getAnonymousId();
+      // Need the fingerprint plus at least one stable id to attach it to. This
+      // fires for anon-only visitors too (no ga_id), so a pageview-created
+      // visitor still accumulates its fingerprint. Never fingerprint-only.
+      if (!this._fingerprint || (!gaId && !anonId)) return;
 
       this._fingerprintReconcileSent = true;
 
@@ -208,7 +270,7 @@
         event_name: 'fingerprint_reconcile',
         reconcile_only: true,
         ga_id: gaId,
-        anonymous_id: this.getCookie(this.config.anonCookieName),
+        anonymous_id: anonId,
         fingerprint: this._fingerprint,
         url: window.location.href,
         referrer: document.referrer,
