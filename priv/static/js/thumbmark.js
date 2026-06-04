@@ -31,8 +31,9 @@ var ThumbmarkModule = {
     script.onload = function() {
       if (window.ThumbmarkJS && window.ThumbmarkJS.getFingerprint) {
         window.ThumbmarkJS.getFingerprint().then(function(fp) {
-          ga._fingerprint = fp;
-          if (ga._onFingerprintReady) ga._onFingerprintReady(fp);
+          // Single entry point: caches the fingerprint and reconciles it to the
+          // current visitor (incl. anon-only visitors after the pageview fired).
+          if (ga.setFingerprint) ga.setFingerprint(fp);
         }).catch(function(e) {
           console.warn('[GoodAnalytics] Fingerprint generation failed:', e);
         });
