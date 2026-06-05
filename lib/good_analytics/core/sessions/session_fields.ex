@@ -3,6 +3,7 @@ defmodule GoodAnalytics.Core.Sessions.SessionFields do
   Pure per-event session field computation.
   """
 
+  alias GoodAnalytics.Core.Events.UrlNormalizer
   alias GoodAnalytics.Core.Sessions.Acquisition
   alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Maps
@@ -18,7 +19,7 @@ defmodule GoodAnalytics.Core.Sessions.SessionFields do
   @spec new_session_attrs(String.t(), map(), DateTime.t()) :: map()
   def new_session_attrs(event_type, attrs, ts) do
     pageview? = pageview?(event_type)
-    path = Maps.get_indifferent(attrs, :path)
+    path = page_path(attrs)
     pageviews = if pageview?, do: 1, else: 0
 
     seed =
@@ -48,7 +49,7 @@ defmodule GoodAnalytics.Core.Sessions.SessionFields do
   @spec update_session_attrs(Session.t(), String.t(), map(), DateTime.t()) :: map()
   def update_session_attrs(%Session{} = live, event_type, attrs, ts) do
     pageview? = pageview?(event_type)
-    path = Maps.get_indifferent(attrs, :path)
+    path = page_path(attrs)
 
     pageviews = count(live, :pageviews) + if(pageview?, do: 1, else: 0)
     events = count(live, :events) + 1
@@ -82,6 +83,21 @@ defmodule GoodAnalytics.Core.Sessions.SessionFields do
 
   defp pageview?("pageview"), do: true
   defp pageview?(_event_type), do: false
+
+  defp page_path(attrs) do
+    case Maps.get_indifferent(attrs, :path) do
+      path when is_binary(path) and path != "" ->
+        path
+
+      _ ->
+        attrs
+        |> Maps.get_indifferent(:url)
+        |> path_from_url()
+    end
+  end
+
+  defp path_from_url(url) when is_binary(url) and url != "", do: UrlNormalizer.path(url)
+  defp path_from_url(_url), do: nil
 
   defp interactive?(event_type), do: event_type in @interactive_event_types
 

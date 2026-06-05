@@ -51,6 +51,19 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
       assert seed.device_type == "desktop"
     end
 
+    test "derives entry and exit page from url when path is missing" do
+      seed =
+        SessionFields.new_session_attrs(
+          "pageview",
+          %{url: "https://x.test/docs/getting-started?utm_source=seed#hero"},
+          @t0
+        )
+
+      assert seed.entry_url == "https://x.test/docs/getting-started?utm_source=seed#hero"
+      assert seed.entry_page == "/docs/getting-started"
+      assert seed.exit_page == "/docs/getting-started"
+    end
+
     test "a first non-pageview interactive event is not a bounce and counts only as an event" do
       seed = SessionFields.new_session_attrs("lead", %{path: "/contact"}, @t0)
 
@@ -88,6 +101,23 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
       assert changes.duration_seconds == 30
       # 2 pageviews ⇒ engaged.
       assert changes.is_engaged == true
+    end
+
+    test "derives exit page from url when a later pageview has no path" do
+      live =
+        new_session(%{pageviews: 1, events: 1, entry_page: "/landing", exit_page: "/landing"})
+
+      ts = DateTime.add(@t0, 30, :second)
+
+      changes =
+        SessionFields.update_session_attrs(
+          live,
+          "pageview",
+          %{url: "https://x.test/pricing?utm_source=seed#plans"},
+          ts
+        )
+
+      assert changes.exit_page == "/pricing"
     end
 
     test "an interactive non-pageview event flips bounce without incrementing pageviews" do

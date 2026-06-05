@@ -71,6 +71,28 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
     assert Events.get_event(@ws, e1.id).session_id == Events.get_event(@ws, e2.id).session_id
   end
 
+  test "derives session entry and exit pages from url when historical events lack path" do
+    vid = create_visitor!().id
+    t0 = ~U[2026-05-01 09:00:00.000000Z]
+
+    insert_event!(vid, "pageview", nil, t0, %{
+      url: "https://x.test/docs/getting-started?utm_source=seed#hero"
+    })
+
+    insert_event!(vid, "pageview", nil, DateTime.add(t0, 10 * 60, :second), %{
+      url: "https://x.test/pricing?utm_source=seed#plans"
+    })
+
+    assert {:ok, %{events: 2, sessions: 1}} = Backfill.run(batch_size: 100)
+
+    session =
+      from(s in Session, where: s.visitor_id == ^vid)
+      |> GoodAnalytics.TestRepo.one!(prefix: "good_analytics")
+
+    assert session.entry_page == "/docs/getting-started"
+    assert session.exit_page == "/pricing"
+  end
+
   test "splits same-window historical sessions when acquisition changes" do
     vid = create_visitor!().id
     t0 = ~U[2026-05-01 09:00:00.000000Z]
