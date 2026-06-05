@@ -67,18 +67,21 @@ defmodule GoodAnalytics.Core.Links.Redirect do
 
       final_destination = build_redirect_url(destination, link, conn, click_id, geo_map)
 
-      hook_results =
-        Hooks.notify_sync(
-          :link_click,
-          %{
-            link: link,
-            click_id: click_id,
-            source: source,
-            qr: qr,
-            params: conn.query_params
-          },
-          visitor
-        )
+      hook_event = %{
+        link: link,
+        click_id: click_id,
+        source: source,
+        qr: qr,
+        params: conn.query_params
+      }
+
+      # Sync tier: bounded (50ms), reply-carrying — may set cookies on the response.
+      hook_results = Hooks.notify_sync(:link_click, hook_event, visitor)
+
+      # Async opt-in tier: side-effect hooks (e.g. a subscriber identify) run
+      # fire-and-forget off the sync budget, so they aren't bounded by the
+      # redirect's latency and the redirect never waits on them.
+      Hooks.notify_detached(:link_click, hook_event, visitor)
 
       conn
       |> Attribution.maybe_set_cookie(referral_context)

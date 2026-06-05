@@ -204,8 +204,14 @@ defmodule GoodAnalytics do
 
   # ── Hooks ──
 
-  @doc "Register a callback for an event type."
-  def register_hook(event_type, callback), do: Hooks.register(event_type, callback)
+  @doc """
+  Register a callback for an event type.
+
+  Pass `async: true` to register a slow, side-effecting hook that runs
+  fire-and-forget off the sync redirect budget (see `GoodAnalytics.Hooks`).
+  """
+  def register_hook(event_type, callback, opts \\ []),
+    do: Hooks.register(event_type, callback, opts)
 
   # ── Private ──
 
