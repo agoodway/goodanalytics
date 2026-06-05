@@ -44,7 +44,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   """
   def event(conn, params) do
     workspace_id = workspace_id(conn, params)
-    source = ga_source(conn)
+    source = ga_source(conn, params)
     log_beacon_debug(conn, params, source, "event")
 
     signals = %{
@@ -158,7 +158,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
     # Validate referral partner if this is a referral link
     referral_context = build_referral_context(link, click_id)
-    source = ga_source(conn)
+    source = ga_source(conn, params)
     log_beacon_debug(conn, params, source, "click")
 
     signals = %{
@@ -229,9 +229,35 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
   defp verify_payload_ref_token(_), do: {:error, :not_present}
 
-  # Use an upstream-assigned source (e.g. Pro's Ingest.Filter) when present;
-  # otherwise classify from this request so bare hosts still get attribution.
-  defp ga_source(conn), do: conn.assigns[:ga_source] || SourceClassifier.classify(conn)
+  # Use an upstream-assigned source (e.g. Pro's Ingest.Filter) when present.
+  # Otherwise classify from the JS payload — the url and document.referrer the
+  # SDK reports — never the HTTP request envelope. A beacon is a fetch FROM the
+  # page, so the request Referer header is always the current page (a self-
+  # referral) and the request query string is empty; the real signals live in
+  # the body. Reading the body keeps classification correct across any host
+  # (Astro, PHP, core-direct) and any CDN/edge rewrite that re-originates the
+  # request. A missing url/referrer degrades to :direct rather than self-referring.
+  defp ga_source(conn, params) do
+    conn.assigns[:ga_source] || SourceClassifier.classify(beacon_signal(params))
+  end
+
+  defp beacon_signal(params) do
+    %{
+      query_params: url_query_params(Map.get(params, "url")),
+      referer: Map.get(params, "referrer")
+    }
+  end
+
+  defp url_query_params(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{query: query} when is_binary(query) -> URI.decode_query(query)
+      _uri -> %{}
+    end
+  rescue
+    URI.Error -> %{}
+  end
+
+  defp url_query_params(_url), do: %{}
 
   defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
        when is_binary(pid) do
