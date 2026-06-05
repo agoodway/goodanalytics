@@ -24,6 +24,7 @@ defmodule GoodAnalytics.Application do
       # and `GoodAnalytics.Geo.enqueue_enrichment/2` drops the enrichment
       # (event ingest itself is unaffected — enrichment is purely advisory).
       {Task.Supervisor, name: GoodAnalytics.GeoTaskSupervisor, max_children: 10_000},
+      GoodAnalytics.Core.Sessions.LiveCache,
       {GoodAnalytics.Hooks, []},
       {GoodAnalytics.PartitionManager, []},
       GoodAnalytics.Geo.Loader

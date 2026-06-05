@@ -3,6 +3,7 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
 
   alias GoodAnalytics.Core.Events
   alias GoodAnalytics.Core.Events.{Event, Recorder}
+  alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Visitors
 
   describe "record/3" do
@@ -109,6 +110,13 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
       visitor = create_visitor!()
       assert {:error, changeset} = Recorder.record(visitor, "invalid_type")
       assert errors_on(changeset)[:event_type]
+
+      session_count =
+        from(s in Session, where: s.visitor_id == ^visitor.id)
+        |> GoodAnalytics.TestRepo.aggregate(:count, prefix: "good_analytics")
+
+      assert session_count == 0
+      assert Visitors.get_visitor(visitor.id).total_sessions == 0
     end
 
     test "stamps inserted_at on insert (composite PK requirement)" do
@@ -427,6 +435,75 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
       for col <- expected do
         assert MapSet.member?(present, col), "expected ga_events.#{col} to exist"
       end
+    end
+  end
+
+  describe "sessionization" do
+    test "stamps a session_id on the recorded event" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test/a"})
+
+      assert {:ok, _} = Ecto.UUID.cast(event.session_id)
+
+      # Persisted, not just in-memory.
+      assert Events.get_by_id(event.id).session_id == event.session_id
+    end
+
+    test "two pageviews under 30 minutes share one session_id" do
+      visitor = create_visitor!()
+
+      {:ok, e1} = Recorder.record(visitor, "pageview", %{url: "https://x.test/a"})
+      {:ok, e2} = Recorder.record(visitor, "pageview", %{url: "https://x.test/b"})
+
+      assert e2.session_id == e1.session_id
+    end
+
+    test "record_click/3 also stamps a session_id" do
+      visitor = create_visitor!()
+      link = create_link!()
+
+      {:ok, event} =
+        Recorder.record_click(visitor, link, %{click_id: Uniq.UUID.uuid7()})
+
+      assert event.event_type == "link_click"
+      assert {:ok, _} = Ecto.UUID.cast(event.session_id)
+    end
+
+    test "engagement events with no live session are dropped by record/3" do
+      visitor = create_visitor!()
+
+      assert {:ok, :dropped} =
+               Recorder.record(visitor, "engagement", %{engaged_ms: 12_000})
+
+      session_count =
+        from(s in Session, where: s.visitor_id == ^visitor.id)
+        |> GoodAnalytics.TestRepo.aggregate(:count, prefix: "good_analytics")
+
+      assert session_count == 0
+      assert Visitors.get_visitor(visitor.id).total_sessions == 0
+    end
+
+    test "session carries the event's device columns" do
+      visitor = create_visitor!()
+
+      ua =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " <>
+          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test/a", user_agent: ua})
+
+      session =
+        GoodAnalytics.TestRepo.get(
+          GoodAnalytics.Core.Sessions.Session,
+          event.session_id,
+          prefix: "good_analytics"
+        )
+
+      assert session.device_type == "desktop"
+      assert session.browser == "Chrome"
     end
   end
 end

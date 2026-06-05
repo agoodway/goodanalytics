@@ -2,7 +2,11 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
   use GoodAnalytics.DataCase, async: false
 
   alias GoodAnalytics.Core.Events.Event
+  alias GoodAnalytics.Core.IdentityResolver
+  alias GoodAnalytics.Core.Sessions
+  alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Tracking.BeaconController
+  alias GoodAnalytics.Core.Visitors.Visitor
 
   import Plug.Test
 
@@ -55,6 +59,136 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
       assert event.event_type == "pageview"
       assert event.url == "https://example.com/docs"
       assert {:ok, _} = Ecto.UUID.cast(event.id)
+    end
+
+    test "forwards engagement metrics from top-level SDK payload" do
+      visitor = create_visitor!(%{anonymous_ids: ["anon-engagement-controller"]})
+
+      {:ok, pageview_session} =
+        Sessions.sessionize(
+          %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
+          "pageview",
+          %{path: "/pricing", __ts__: DateTime.utc_now()}
+        )
+
+      conn =
+        BeaconController.event(build_event_conn(), %{
+          "event_type" => "engagement",
+          "anonymous_id" => "anon-engagement-controller",
+          "url" => "https://example.com/pricing",
+          "engaged_ms" => 12_000,
+          "scroll_depth" => 80
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.event_type == "engagement"
+      assert event.session_id == pageview_session.id
+      assert event.properties["engaged_ms"] == 12_000
+      assert event.properties["scroll_depth"] == 80
+
+      session =
+        GoodAnalytics.TestRepo.get!(Session, pageview_session.id, prefix: "good_analytics")
+
+      assert session.engaged_seconds == 12
+    end
+
+    test "drops engagement for unknown visitors without creating identity or event rows" do
+      before_visitors =
+        GoodAnalytics.TestRepo.aggregate(Visitor, :count, :id, prefix: "good_analytics")
+
+      before_events =
+        GoodAnalytics.TestRepo.aggregate(Event, :count, :id, prefix: "good_analytics")
+
+      conn =
+        BeaconController.event(build_event_conn(), %{
+          "event_type" => "engagement",
+          "anonymous_id" => "unknown-engagement-controller",
+          "url" => "https://example.com/pricing",
+          "engaged_ms" => 12_000,
+          "scroll_depth" => 80
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      assert GoodAnalytics.TestRepo.aggregate(Visitor, :count, :id, prefix: "good_analytics") ==
+               before_visitors
+
+      assert GoodAnalytics.TestRepo.aggregate(Event, :count, :id, prefix: "good_analytics") ==
+               before_events
+    end
+
+    test "drops ambiguous engagement when existing signals resolve to multiple visitors" do
+      ga_visitor = create_visitor!(%{ga_id: "ga-ambiguous-engagement"})
+      anon_visitor = create_visitor!(%{anonymous_ids: ["anon-ambiguous-engagement"]})
+
+      {:ok, anon_session} =
+        Sessions.sessionize(
+          %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: anon_visitor.id},
+          "pageview",
+          %{path: "/pricing", __ts__: DateTime.utc_now()}
+        )
+
+      assert [_candidate_1, _candidate_2] =
+               IdentityResolver.find_candidates(
+                 %{
+                   ga_id: ga_visitor.ga_id,
+                   anonymous_id: "anon-ambiguous-engagement"
+                 },
+                 GoodAnalytics.default_workspace_id()
+               )
+
+      before_events =
+        GoodAnalytics.TestRepo.aggregate(Event, :count, :id, prefix: "good_analytics")
+
+      conn =
+        BeaconController.event(build_event_conn(), %{
+          "event_type" => "engagement",
+          "ga_id" => ga_visitor.ga_id,
+          "anonymous_id" => "anon-ambiguous-engagement",
+          "url" => "https://example.com/pricing",
+          "engaged_ms" => 12_000,
+          "scroll_depth" => 80
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      assert GoodAnalytics.TestRepo.aggregate(Event, :count, :id, prefix: "good_analytics") ==
+               before_events
+
+      session = GoodAnalytics.TestRepo.get!(Session, anon_session.id, prefix: "good_analytics")
+      assert session.engaged_seconds == 0
+    end
+
+    test "caps oversized engagement duration before recording" do
+      visitor = create_visitor!(%{anonymous_ids: ["anon-engagement-cap"]})
+
+      {:ok, pageview_session} =
+        Sessions.sessionize(
+          %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
+          "pageview",
+          %{path: "/pricing", __ts__: DateTime.utc_now()}
+        )
+
+      conn =
+        BeaconController.event(build_event_conn(), %{
+          "event_type" => "engagement",
+          "anonymous_id" => "anon-engagement-cap",
+          "url" => "https://example.com/pricing",
+          "engaged_ms" => 9_999_999_999,
+          "scroll_depth" => 80
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.properties["engaged_ms"] == 30 * 60 * 1000
+
+      session =
+        GoodAnalytics.TestRepo.get!(Session, pageview_session.id, prefix: "good_analytics")
+
+      assert session.engaged_seconds == 30 * 60
     end
   end
 

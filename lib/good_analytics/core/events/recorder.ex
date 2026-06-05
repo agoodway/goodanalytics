@@ -15,6 +15,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
   alias GoodAnalytics.Connectors.{PostCommit, Signals}
   alias GoodAnalytics.Core.Events.Event
   alias GoodAnalytics.Core.Events.UrlNormalizer
+  alias GoodAnalytics.Core.Sessions
   alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Devices
   alias GoodAnalytics.Hooks
@@ -51,8 +52,15 @@ defmodule GoodAnalytics.Core.Events.Recorder do
   planning uses a durable post-commit handoff when available so caller-owned
   transactions do not leak dispatches on rollback.
   """
-  def record(visitor, event_type, attrs \\ %{}) do
+  def record(visitor, event_type, attrs \\ %{})
+
+  def record(visitor, "engagement", attrs) do
+    record_engagement_event(visitor, attrs)
+  end
+
+  def record(visitor, event_type, attrs) do
     repo = Repo.repo()
+    now = DateTime.utc_now()
 
     connector_signals = Map.get(attrs, :connector_signals, %{})
 
@@ -91,9 +99,10 @@ defmodule GoodAnalytics.Core.Events.Recorder do
 
     changeset =
       Event.changeset(
-        %Event{id: Uniq.UUID.uuid7(), inserted_at: DateTime.utc_now()},
+        %Event{id: Uniq.UUID.uuid7(), inserted_at: now},
         event_attrs
       )
+      |> maybe_put_session_id(visitor, event_type, event_attrs, attrs, now)
 
     case repo.insert(changeset, prefix: GoodAnalytics.schema_name()) do
       {:ok, event} ->
@@ -208,6 +217,114 @@ defmodule GoodAnalytics.Core.Events.Recorder do
     :ok
   rescue
     _ -> :ok
+  end
+
+  defp maybe_put_session_id(
+         %Ecto.Changeset{valid?: false} = changeset,
+         _visitor,
+         _event_type,
+         _event_attrs,
+         _attrs,
+         _now
+       ) do
+    changeset
+  end
+
+  defp maybe_put_session_id(changeset, visitor, event_type, event_attrs, attrs, now) do
+    session_id =
+      case maybe_sessionize(visitor, event_type, event_attrs, attrs, now) do
+        {:ok, session} -> session.id
+        _ -> nil
+      end
+
+    Ecto.Changeset.put_change(changeset, :session_id, session_id)
+  end
+
+  # Engagement events attach to an existing live session in Task 7. Keep this
+  # path best-effort so a sessionization failure never drops the event.
+  defp maybe_sessionize(_visitor, "engagement", _event_attrs, _attrs, _now), do: :no_session
+
+  defp maybe_sessionize(visitor, event_type, event_attrs, attrs, now) do
+    key = %{
+      workspace_id: visitor.workspace_id,
+      visitor_id: visitor.id,
+      anonymous_id: Map.get(attrs, :anonymous_id) || Map.get(attrs, "anonymous_id")
+    }
+
+    Sessions.sessionize(key, event_type, Map.put(event_attrs, :__ts__, now))
+  rescue
+    error ->
+      require Logger
+      Logger.debug("GoodAnalytics: sessionize failed: #{inspect(error)}")
+      :no_session
+  end
+
+  defp record_engagement_event(visitor, attrs) do
+    key = %{
+      workspace_id: visitor.workspace_id,
+      visitor_id: visitor.id,
+      anonymous_id: Map.get(attrs, :anonymous_id) || Map.get(attrs, "anonymous_id")
+    }
+
+    ts = DateTime.utc_now()
+    changeset = engagement_event_changeset(visitor, nil, attrs, ts)
+
+    if changeset.valid? do
+      case Sessions.record_engagement(key, attrs, ts) do
+        {:ok, session} -> insert_engagement_event(visitor, session, attrs, ts)
+        :no_session -> {:ok, :dropped}
+      end
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp insert_engagement_event(visitor, session, attrs, ts) do
+    repo = Repo.repo()
+
+    visitor
+    |> engagement_event_changeset(session.id, attrs, ts)
+    |> repo.insert(prefix: GoodAnalytics.schema_name())
+  end
+
+  defp engagement_event_changeset(visitor, session_id, attrs, ts) do
+    properties =
+      engagement_properties(attrs)
+
+    raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
+
+    event_attrs = %{
+      workspace_id: visitor.workspace_id,
+      visitor_id: visitor.id,
+      session_id: session_id,
+      event_type: "engagement",
+      url: raw_url,
+      host: UrlNormalizer.host(raw_url),
+      path: UrlNormalizer.path(raw_url),
+      properties: properties
+    }
+
+    %Event{id: Uniq.UUID.uuid7(), inserted_at: ts}
+    |> Event.changeset(event_attrs)
+  end
+
+  defp engagement_properties(attrs) do
+    case Map.get(attrs, :properties, %{}) do
+      props when is_map(props) ->
+        props
+        |> put_if(attrs, :engaged_ms, "engaged_ms")
+        |> put_if(attrs, :scroll_depth, "scroll_depth")
+
+      other ->
+        other
+    end
+  end
+
+  defp put_if(props, attrs, key, string_key) do
+    case Map.get(attrs, key) || Map.get(attrs, string_key) do
+      nil -> props
+      value -> Map.put(props, string_key, value)
+    end
   end
 
   # Link click hooks are sync, but from the recorder they're async

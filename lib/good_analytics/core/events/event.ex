@@ -34,6 +34,7 @@ defmodule GoodAnalytics.Core.Events.Event do
 
     field(:workspace_id, Ecto.UUID)
     field(:visitor_id, Ecto.UUID)
+    field(:session_id, Ecto.UUID)
 
     # Event classification
     field(:event_type, :string)
@@ -95,6 +96,7 @@ defmodule GoodAnalytics.Core.Events.Event do
   @required_fields [:workspace_id, :visitor_id, :event_type]
   @optional_fields [
     :event_name,
+    :session_id,
     :link_id,
     :click_id,
     :partner_id,
