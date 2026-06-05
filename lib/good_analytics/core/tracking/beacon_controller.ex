@@ -45,7 +45,6 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   def event(conn, params) do
     workspace_id = workspace_id(conn, params)
     source = ga_source(conn, params)
-    log_beacon_debug(conn, params, source, "event")
 
     signals = %{
       ga_id: Map.get(params, "ga_id"),
@@ -159,7 +158,6 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
     # Validate referral partner if this is a referral link
     referral_context = build_referral_context(link, click_id)
     source = ga_source(conn, params)
-    log_beacon_debug(conn, params, source, "click")
 
     signals = %{
       click_id: click_id,
@@ -361,62 +359,4 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp validate_workspace_id(_), do: nil
-
-  # --- Temporary beacon diagnostics (opt-in) -------------------------------
-  #
-  # Logs one structured line per inbound beacon comparing three views of the
-  # same request: the server-read REQUEST HEADERS (User-Agent, Referer, the
-  # CDN/edge forwarding headers, query string), the JS-supplied BODY (url,
-  # referrer, event_type, event_name), and the COMPUTED source classification.
-  #
-  # This exists to diagnose attribution loss behind a CDN/edge rewrite (Vercel,
-  # Cloudflare, etc.) where a request is re-originated and header-derived signals
-  # (UA/Referer/IP) may differ from what the browser actually sent in the body.
-  # Compare `hdr_ua`/`hdr_referer` against `body_url`/`body_referrer` to see what
-  # survives, and `body_event_name` to confirm the JS payload arrives intact.
-  #
-  # Disabled by default. Enable per environment without a code change via either:
-  #   config :good_analytics, debug_beacon: true
-  #   # or an env var wired in the host app, e.g.
-  #   GOODANALYTICS_DEBUG_BEACON=1
-  # Grep the logs for the `ga_beacon` tag. Remove once the fix is designed.
-  defp log_beacon_debug(conn, params, source, endpoint) do
-    if debug_beacon_enabled?() do
-      hdr = fn name -> conn |> Plug.Conn.get_req_header(name) |> List.first() end
-
-      Logger.info(
-        # body_keys=0 with a present content-type means the JSON body did not
-        # parse (e.g. an edge rewrite changed content-type) vs. headers stripped.
-        "ga_beacon endpoint=#{endpoint} " <>
-          "remote_ip=#{conn.remote_ip |> :inet.ntoa() |> to_string()} " <>
-          "hdr_ua=#{inspect(truncate_log(hdr.("user-agent")))} " <>
-          "hdr_referer=#{inspect(truncate_log(hdr.("referer")))} " <>
-          "hdr_ct=#{inspect(hdr.("content-type"))} " <>
-          "hdr_xff=#{inspect(hdr.("x-forwarded-for"))} " <>
-          "hdr_xvff=#{inspect(hdr.("x-vercel-forwarded-for"))} " <>
-          "hdr_cf=#{inspect(hdr.("cf-connecting-ip"))} " <>
-          "hdr_host=#{inspect(hdr.("host"))} " <>
-          "qs=#{inspect(truncate_log(conn.query_string))} " <>
-          "body_keys=#{map_size(params)} " <>
-          "body_event_type=#{inspect(Map.get(params, "event_type"))} " <>
-          "body_event_name=#{inspect(Map.get(params, "event_name"))} " <>
-          "body_url=#{inspect(truncate_log(Map.get(params, "url")))} " <>
-          "body_referrer=#{inspect(truncate_log(Map.get(params, "referrer")))} " <>
-          "source_assigned=#{not is_nil(conn.assigns[:ga_source])} " <>
-          "source=#{inspect(source)}"
-      )
-    end
-  rescue
-    # Diagnostics must never break ingestion.
-    _ -> :ok
-  end
-
-  defp debug_beacon_enabled? do
-    Application.get_env(:good_analytics, :debug_beacon, false) or
-      System.get_env("GOODANALYTICS_DEBUG_BEACON") in ["1", "true"]
-  end
-
-  defp truncate_log(nil), do: nil
-  defp truncate_log(value) when is_binary(value), do: String.slice(value, 0, 256)
-  defp truncate_log(value), do: value
 end
