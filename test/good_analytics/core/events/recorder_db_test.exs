@@ -262,6 +262,7 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     @iphone_ua "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " <>
                  "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    @googlebot_ua "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
     test "populates visitor.device from the event user agent" do
       visitor = create_visitor!()
@@ -293,6 +294,139 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
       visitor = create_visitor!()
       {:ok, _} = Recorder.record(visitor, "pageview", %{url: "https://x.test"})
       assert Visitors.get_visitor(visitor.id).device == %{}
+    end
+
+    test "writes event-grain device columns on record/3" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test", user_agent: @desktop_ua})
+
+      assert event.device_type == "desktop"
+      assert event.browser == "Chrome"
+      assert event.browser_version == "120.0.0.0"
+      assert event.os == "Mac"
+      assert event.os_version == "10.15.7"
+      assert event.device_brand == "Apple"
+
+      # Persisted, not just in-memory
+      db_event = Events.get_by_id(event.id)
+      assert db_event.device_type == "desktop"
+      assert db_event.browser == "Chrome"
+      assert db_event.browser_version == "120.0.0.0"
+      assert db_event.os == "Mac"
+      assert db_event.os_version == "10.15.7"
+      assert db_event.device_brand == "Apple"
+    end
+
+    test "writes device columns from string-keyed user_agent attrs" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{
+          "url" => "https://x.test",
+          "user_agent" => @desktop_ua
+        })
+
+      assert event.user_agent == @desktop_ua
+      assert event.device_type == "desktop"
+      assert event.browser == "Chrome"
+    end
+
+    test "ignores caller-supplied device columns when no user agent is present" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{
+          "os" => "Mac",
+          url: "https://x.test",
+          device_type: "desktop",
+          browser: "Chrome"
+        })
+
+      assert event.device_type == nil
+      assert event.browser == nil
+      assert event.os == nil
+    end
+
+    test "writes device columns on record_click/3" do
+      visitor = create_visitor!()
+      link = create_link!()
+
+      {:ok, event} =
+        Recorder.record_click(visitor, link, %{
+          click_id: Uniq.UUID.uuid7(),
+          user_agent: @iphone_ua
+        })
+
+      assert event.event_type == "link_click"
+      assert event.device_type == "smartphone"
+      assert event.browser == "Mobile Safari"
+      assert event.os == "iOS"
+      assert event.os_version == "17.0"
+      assert event.device_brand == "Apple"
+      assert event.device_model == "iPhone"
+    end
+
+    test "leaves device columns NULL when the event has no user agent" do
+      visitor = create_visitor!()
+
+      {:ok, event} = Recorder.record(visitor, "pageview", %{url: "https://x.test"})
+
+      assert event.device_type == nil
+      assert event.browser == nil
+      assert event.os == nil
+      assert event.browser_version == nil
+      assert event.os_version == nil
+      assert event.device_brand == nil
+      assert event.device_model == nil
+      assert event.bot_name == nil
+    end
+
+    test "writes bot_name for bot user agents" do
+      visitor = create_visitor!()
+
+      {:ok, event} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test", user_agent: @googlebot_ua})
+
+      assert event.device_type == "bot"
+      assert event.bot_name =~ "Googlebot"
+    end
+
+    test "still sets visitor.device first-observed (back-compat)" do
+      visitor = create_visitor!()
+
+      {:ok, _} =
+        Recorder.record(visitor, "pageview", %{url: "https://x.test", user_agent: @desktop_ua})
+
+      device = Visitors.get_visitor(visitor.id).device
+      assert device["type"] == "desktop"
+      assert device["browser"] == "Chrome"
+    end
+  end
+
+  describe "device columns exist on ga_events (V09 schema)" do
+    test "device-grain columns are present on ga_events" do
+      expected =
+        ~w(device_type browser os browser_version os_version device_brand device_model bot_name)
+
+      %{rows: rows} =
+        GoodAnalytics.TestRepo.query!(
+          """
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'good_analytics'
+            AND table_name = 'ga_events'
+            AND column_name = ANY($1)
+          """,
+          [expected]
+        )
+
+      present = rows |> List.flatten() |> MapSet.new()
+
+      for col <- expected do
+        assert MapSet.member?(present, col), "expected ga_events.#{col} to exist"
+      end
     end
   end
 end

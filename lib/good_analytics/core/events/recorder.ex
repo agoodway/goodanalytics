@@ -24,6 +24,18 @@ defmodule GoodAnalytics.Core.Events.Recorder do
 
   import Ecto.Query
 
+  @event_device_fields ~w(device_type browser os browser_version os_version device_brand device_model bot_name)a
+  @event_device_field_strings Enum.map(@event_device_fields, &Atom.to_string/1)
+  @record_drop_keys [
+                      :connector_signals,
+                      "connector_signals",
+                      :url,
+                      "url",
+                      :user_agent,
+                      "user_agent"
+                    ] ++
+                      @event_device_fields ++ @event_device_field_strings
+
   @doc """
   Records a generic event.
 
@@ -56,15 +68,18 @@ defmodule GoodAnalytics.Core.Events.Recorder do
       end
 
     raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
+    raw_ua = Map.get(attrs, :user_agent) || Map.get(attrs, "user_agent")
+    device = Devices.parse(raw_ua)
 
     event_attrs =
       attrs
-      |> Map.drop([:connector_signals, "url"])
+      |> Map.drop(@record_drop_keys)
       |> Map.merge(%{
         workspace_id: visitor.workspace_id,
         visitor_id: visitor.id,
         event_type: event_type,
         url: raw_url,
+        user_agent: raw_ua,
         host: UrlNormalizer.host(raw_url),
         path: UrlNormalizer.path(raw_url),
         source_platform: get_in_source(attrs, :platform),
@@ -72,6 +87,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         source_campaign: get_in_source(attrs, :campaign),
         connector_source_context: connector_source_context
       })
+      |> Map.merge(Devices.to_event_attrs(device))
 
     changeset =
       Event.changeset(
@@ -82,7 +98,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
     case repo.insert(changeset, prefix: GoodAnalytics.schema_name()) do
       {:ok, event} ->
         broadcast_event(event)
-        maybe_enrich_device(visitor, attrs)
+        maybe_enrich_device(visitor, device)
         dispatch_hook(event_type, event, visitor)
         PostCommit.maybe_dispatch(event, attrs)
         {:ok, event}
@@ -187,9 +203,8 @@ defmodule GoodAnalytics.Core.Events.Recorder do
   # committed, ignores the conditional-update result (0 rows just means already
   # populated), and never lets an enrichment error crash record/3 or skip the
   # downstream hook/connector dispatch.
-  defp maybe_enrich_device(visitor, attrs) do
-    ua = Map.get(attrs, :user_agent) || Map.get(attrs, "user_agent")
-    Visitors.maybe_set_device(visitor.id, Devices.parse(ua))
+  defp maybe_enrich_device(visitor, device) do
+    Visitors.maybe_set_device(visitor.id, device)
     :ok
   rescue
     _ -> :ok

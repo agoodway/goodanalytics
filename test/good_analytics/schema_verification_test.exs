@@ -149,6 +149,7 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         link_id click_id url referrer referrer_url
         source_platform source_medium source_campaign source
         fingerprint ip_address user_agent
+        device_type browser os browser_version os_version device_brand device_model bot_name
         amount_cents currency properties
         connector_source_context
         host path
@@ -176,6 +177,9 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         idx_ga_events_workspace
         idx_ga_events_click_id
         idx_ga_events_source
+        idx_ga_events_workspace_device_type
+        idx_ga_events_workspace_browser
+        idx_ga_events_workspace_os
       )
 
       for idx <- expected do

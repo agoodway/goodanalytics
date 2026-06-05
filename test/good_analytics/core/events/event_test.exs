@@ -115,6 +115,46 @@ defmodule GoodAnalytics.Core.Events.EventTest do
     end
   end
 
+  describe "changeset/2 device columns" do
+    test "casts device-grain columns" do
+      attrs =
+        Map.merge(@valid_attrs, %{
+          device_type: "desktop",
+          browser: "Chrome",
+          browser_version: "120.0.0.0",
+          os: "Mac",
+          os_version: "10.15",
+          device_brand: "Apple",
+          device_model: "MacBook",
+          bot_name: nil
+        })
+
+      changeset = Event.changeset(%Event{}, attrs)
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_change(changeset, :device_type) == "desktop"
+      assert Ecto.Changeset.get_change(changeset, :browser) == "Chrome"
+      assert Ecto.Changeset.get_change(changeset, :os) == "Mac"
+      assert Ecto.Changeset.get_change(changeset, :browser_version) == "120.0.0.0"
+      assert Ecto.Changeset.get_change(changeset, :os_version) == "10.15"
+      assert Ecto.Changeset.get_change(changeset, :device_brand) == "Apple"
+      assert Ecto.Changeset.get_change(changeset, :device_model) == "MacBook"
+    end
+
+    test "device columns are optional" do
+      changeset = Event.changeset(%Event{}, @valid_attrs)
+      assert changeset.valid?
+    end
+
+    test "casts bot_name for bot events" do
+      attrs = Map.merge(@valid_attrs, %{device_type: "bot", bot_name: "Googlebot"})
+      changeset = Event.changeset(%Event{}, attrs)
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_change(changeset, :bot_name) == "Googlebot"
+    end
+  end
+
   defp errors_on(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Regex.replace(~r"%{(\w+)}", msg, fn _, key ->

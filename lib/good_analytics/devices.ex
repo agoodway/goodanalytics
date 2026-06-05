@@ -43,6 +43,32 @@ defmodule GoodAnalytics.Devices do
 
   def parse(_ua), do: %{}
 
+  @doc """
+  Maps a `parse/1` device map onto event-grain column attrs.
+
+  Keys absent from the device map are omitted so the `Event` changeset leaves
+  the corresponding column NULL. The raw `:ua_inspector` device type is stored
+  verbatim (`humanize_type/1` is applied at read time, not here). For bots,
+  `device_type` is `"bot"` and `bot_name` carries the crawler name.
+  """
+  @spec to_event_attrs(device_map() | nil) :: %{optional(atom()) => String.t()}
+  def to_event_attrs(device) when is_map(device) do
+    %{
+      device_type: Map.get(device, "type"),
+      browser: Map.get(device, "browser"),
+      os: Map.get(device, "os"),
+      browser_version: Map.get(device, "browser_version"),
+      os_version: Map.get(device, "os_version"),
+      device_brand: Map.get(device, "brand"),
+      device_model: Map.get(device, "model"),
+      bot_name: Map.get(device, "name")
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  def to_event_attrs(_device), do: %{}
+
   @doc "Humanize a UA string or a stored device map into a short label."
   @spec label(String.t() | map() | nil) :: String.t()
   def label(nil), do: "Unknown"
