@@ -59,14 +59,21 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
   end
 
   describe "source self-classification (no upstream ga_source)" do
-    test "an event from an AI referrer is recorded with source_medium=ai" do
+    # A beacon is a fetch FROM the page, so the request Referer header is always
+    # the current page (a self-referral) and the request query string is empty.
+    # The real attribution signals live in the JS body (url + document.referrer),
+    # which is the one view that is identical across any host (Astro, PHP,
+    # core-direct) and survives a CDN/edge rewrite. These tests pin the header to
+    # the page itself to prove classification reads the body, not the envelope.
+    test "classifies from the JS body referrer, not the request Referer header" do
       conn =
         build_event_conn()
-        |> Plug.Conn.put_req_header("referer", "https://chatgpt.com/")
+        |> Plug.Conn.put_req_header("referer", "https://site.test/jobs")
         |> BeaconController.event(%{
           "event_type" => "pageview",
           "anonymous_id" => "anon-ai-#{System.unique_integer([:positive])}",
-          "url" => "https://site.test/jobs"
+          "url" => "https://site.test/jobs",
+          "referrer" => "https://chatgpt.com/"
         })
 
       assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
@@ -74,6 +81,39 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
       event = latest_event()
       assert event.source_medium == "ai"
       assert event.source_platform == "chatgpt"
+    end
+
+    test "an empty body referrer is direct, even when the header referer is the page" do
+      conn =
+        build_event_conn()
+        |> Plug.Conn.put_req_header("referer", "https://www.jobsinappraisal.com/jobs/x")
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-direct-#{System.unique_integer([:positive])}",
+          "url" => "https://www.jobsinappraisal.com/jobs/x",
+          "referrer" => ""
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert latest_event().source_medium == "direct"
+    end
+
+    test "classifies UTM params from the JS body url query string" do
+      conn =
+        build_event_conn()
+        |> Plug.Conn.put_req_header("referer", "https://site.test/landing")
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-utm-#{System.unique_integer([:positive])}",
+          "url" => "https://site.test/landing?utm_source=newsletter&utm_medium=email",
+          "referrer" => ""
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.source_medium == "email"
+      assert event.source_platform == "newsletter"
     end
   end
 
