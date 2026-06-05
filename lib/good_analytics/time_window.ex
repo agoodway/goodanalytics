@@ -8,6 +8,23 @@ defmodule GoodAnalytics.TimeWindow do
 
   @type t :: %{start_at: DateTime.t(), end_at: DateTime.t()}
 
+  @doc """
+  Fetches and validates the `:window` option, returning the `t()` map.
+
+  Raises `ArgumentError` when `:window` is missing or is not a
+  `%{start_at: DateTime.t(), end_at: DateTime.t()}` map.
+  """
+  @spec fetch!(keyword()) :: t()
+  def fetch!(opts) do
+    case Keyword.get(opts, :window) do
+      %{start_at: %DateTime{}, end_at: %DateTime{}} = window ->
+        window
+
+      other ->
+        raise ArgumentError, "expected :window %{start_at:, end_at:}, got: #{inspect(other)}"
+    end
+  end
+
   @doc "Returns the start timestamp of a trailing window ending at `end_at`."
   @spec trailing_start(DateTime.t(), non_neg_integer(), :day | :hour | :minute | :second) ::
           DateTime.t()
