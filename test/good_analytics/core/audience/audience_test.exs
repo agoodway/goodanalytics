@@ -369,4 +369,89 @@ defmodule GoodAnalytics.Core.AudienceTest do
       assert desktop.sessions == nil
     end
   end
+
+  describe "breakdown/3 — single-grain ordering and limit" do
+    test "event-only breakdown returns the top-N buckets ordered by the metric" do
+      desk = create_visitor!()
+      seed_event!(desk, "pageview", %{path: "/a", device_type: "desktop"})
+      seed_event!(desk, "pageview", %{path: "/b", device_type: "desktop"})
+      seed_event!(desk, "pageview", %{path: "/c", device_type: "desktop"})
+
+      mob = create_visitor!()
+      seed_event!(mob, "pageview", %{path: "/d", device_type: "mobile"})
+
+      tab = create_visitor!()
+      seed_event!(tab, "pageview", %{path: "/e", device_type: "tablet"})
+
+      rows =
+        Audience.breakdown(@ws, :device_type,
+          window: window(),
+          metrics: [:events],
+          order_by: {:events, :desc},
+          limit: 2
+        )
+
+      assert length(rows) == 2
+      assert hd(rows).value == "desktop"
+      assert hd(rows).events == 3
+      # desktop (3) is rank 1; mobile and tablet tie at 1 event, so exactly one of
+      # them fills rank 2 — assert the metric, not which tied value wins.
+      assert Enum.at(rows, 1).events == 1
+    end
+
+    test "ascending order returns the smallest bucket first" do
+      desk = create_visitor!()
+      seed_event!(desk, "pageview", %{path: "/a", device_type: "desktop"})
+      seed_event!(desk, "pageview", %{path: "/b", device_type: "desktop"})
+
+      mob = create_visitor!()
+      seed_event!(mob, "pageview", %{path: "/c", device_type: "mobile"})
+
+      rows =
+        Audience.breakdown(@ws, :device_type,
+          window: window(),
+          metrics: [:events],
+          order_by: {:events, :asc},
+          limit: 1
+        )
+
+      assert length(rows) == 1
+      assert hd(rows).value == "mobile"
+    end
+
+    test "session-only breakdown pushes ORDER BY/LIMIT and returns the top-N buckets" do
+      insert_session!(%{device_type: "desktop", is_bounce: false, duration_seconds: 10})
+      insert_session!(%{device_type: "desktop", is_bounce: false, duration_seconds: 20})
+      insert_session!(%{device_type: "desktop", is_bounce: true, duration_seconds: 0})
+      insert_session!(%{device_type: "mobile", is_bounce: true, duration_seconds: 0})
+
+      rows =
+        Audience.breakdown(@ws, :device_type,
+          window: window(),
+          metrics: [:sessions, :bounce_rate],
+          order_by: {:sessions, :desc},
+          limit: 1
+        )
+
+      assert length(rows) == 1
+      assert hd(rows).value == "desktop"
+      assert hd(rows).sessions == 3
+    end
+
+    test "out-of-grain order metric does not push down and does not crash" do
+      v = create_visitor!()
+      seed_event!(v, "pageview", %{path: "/a", device_type: "desktop"})
+
+      # metrics is event-only but order_by names a session metric; this must not
+      # raise (the session metric is simply absent from the rows).
+      rows =
+        Audience.breakdown(@ws, :device_type,
+          window: window(),
+          metrics: [:events],
+          order_by: {:sessions, :desc}
+        )
+
+      assert [%{value: "desktop", events: 1}] = rows
+    end
+  end
 end

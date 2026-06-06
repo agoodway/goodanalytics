@@ -57,5 +57,33 @@ defmodule GoodAnalytics.Core.AnalyticsSessionMetricsTest do
       assert m.exit_pages["/pricing"] == 1
       assert m.exit_pages["/checkout"] == 1
     end
+
+    test "include_page_tallies: false omits entry_pages/exit_pages but keeps headline metrics" do
+      insert_session!(%{
+        is_bounce: false,
+        is_engaged: true,
+        duration_seconds: 30,
+        entry_page: "/a",
+        exit_page: "/b"
+      })
+
+      result = Analytics.session_metrics(@ws, window: window(), include_page_tallies: false)
+
+      assert result.sessions == 1
+      assert is_float(result.bounce_rate)
+      assert is_float(result.avg_duration)
+      assert is_float(result.engaged_rate)
+      refute Map.has_key?(result, :entry_pages)
+      refute Map.has_key?(result, :exit_pages)
+    end
+
+    test "page tallies are included by default" do
+      insert_session!(%{entry_page: "/a", exit_page: "/b", duration_seconds: 5})
+
+      result = Analytics.session_metrics(@ws, window: window())
+
+      assert Map.has_key?(result, :entry_pages)
+      assert Map.has_key?(result, :exit_pages)
+    end
   end
 end

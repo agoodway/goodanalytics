@@ -350,4 +350,23 @@ defmodule GoodAnalytics.SchemaVerificationTest do
       assert "ga_settings_workspace_id_key_key" in indexes
     end
   end
+
+  describe "ga_sessions" do
+    test "has the per-dimension breakdown indexes" do
+      indexes = index_names("ga_sessions")
+
+      expected = ~w(
+        idx_ga_sessions_workspace_device_type_started
+        idx_ga_sessions_workspace_browser_started
+        idx_ga_sessions_workspace_os_started
+        idx_ga_sessions_workspace_source_platform_started
+        idx_ga_sessions_workspace_source_medium_started
+        idx_ga_sessions_workspace_source_campaign_started
+      )
+
+      for idx <- expected do
+        assert idx in indexes, "Missing index: #{idx}"
+      end
+    end
+  end
 end

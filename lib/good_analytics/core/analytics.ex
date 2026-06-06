@@ -130,34 +130,43 @@ defmodule GoodAnalytics.Core.Analytics do
   Returns `%{sessions:, bounce_rate:, avg_duration:, engaged_rate:,
   entry_pages: %{path => count}, exit_pages: %{path => count}}`. Rates are
   floats in `0.0..1.0`; an empty window yields all-zero metrics and empty
-  page maps. Options: `:window` (required).
+  page maps. Options: `:window` (required), `:include_page_tallies` (boolean,
+  default `true`; pass `false` to return only the headline aggregate without
+  `entry_pages`/`exit_pages`, saving two queries).
   """
   @spec session_metrics(Ecto.UUID.t(), keyword()) :: map()
   def session_metrics(workspace_id, opts) when is_binary(workspace_id) do
     window = TimeWindow.fetch!(opts)
     repo = Repo.repo()
 
-    aggregate =
-      from(s in Session,
-        where: s.workspace_id == ^workspace_id,
-        where: s.started_at >= ^window.start_at and s.started_at < ^window.end_at,
-        select: %{
-          sessions: count(s.id),
-          bounce_rate: type(coalesce(avg(fragment("(?)::int", s.is_bounce)), 0.0), :float),
-          avg_duration: type(coalesce(avg(s.duration_seconds), 0.0), :float),
-          engaged_rate: type(coalesce(avg(fragment("(?)::int", s.is_engaged)), 0.0), :float)
-        }
-      )
-      |> repo.one(prefix: GoodAnalytics.schema_name())
-      |> case do
-        nil -> %{sessions: 0, bounce_rate: 0.0, avg_duration: 0.0, engaged_rate: 0.0}
-        row -> row
-      end
+    aggregate = session_headline_metrics(repo, workspace_id, window)
 
-    Map.merge(aggregate, %{
-      entry_pages: page_tally(repo, workspace_id, window, :entry_page),
-      exit_pages: page_tally(repo, workspace_id, window, :exit_page)
-    })
+    if Keyword.get(opts, :include_page_tallies, true) do
+      Map.merge(aggregate, %{
+        entry_pages: page_tally(repo, workspace_id, window, :entry_page),
+        exit_pages: page_tally(repo, workspace_id, window, :exit_page)
+      })
+    else
+      aggregate
+    end
+  end
+
+  defp session_headline_metrics(repo, workspace_id, window) do
+    from(s in Session,
+      where: s.workspace_id == ^workspace_id,
+      where: s.started_at >= ^window.start_at and s.started_at < ^window.end_at,
+      select: %{
+        sessions: count(s.id),
+        bounce_rate: type(coalesce(avg(fragment("(?)::int", s.is_bounce)), 0.0), :float),
+        avg_duration: type(coalesce(avg(s.duration_seconds), 0.0), :float),
+        engaged_rate: type(coalesce(avg(fragment("(?)::int", s.is_engaged)), 0.0), :float)
+      }
+    )
+    |> repo.one(prefix: GoodAnalytics.schema_name())
+    |> case do
+      nil -> %{sessions: 0, bounce_rate: 0.0, avg_duration: 0.0, engaged_rate: 0.0}
+      row -> row
+    end
   end
 
   @doc """
@@ -177,15 +186,14 @@ defmodule GoodAnalytics.Core.Analytics do
 
     counts = active_event_metrics(repo, workspace_id, window)
     new_visitors = new_visitors(repo, workspace_id, window)
-    identification_rate = identification_rate(repo, workspace_id, window)
-    sessions = session_metrics(workspace_id, window: window)
+    sessions = session_metrics(workspace_id, window: window, include_page_tallies: false)
 
     %{
       visitors: counts.visitors,
       new_visitors: new_visitors,
       pageviews: counts.pageviews,
       revenue: counts.revenue,
-      identification_rate: identification_rate,
+      identification_rate: counts.identification_rate,
       sessions: sessions.sessions,
       bounce_rate: sessions.bounce_rate,
       avg_duration: sessions.avg_duration,
@@ -304,6 +312,16 @@ defmodule GoodAnalytics.Core.Analytics do
       where: e.inserted_at >= ^window.start_at and e.inserted_at < ^window.end_at,
       select: %{
         visitors: count(fragment("coalesce(?, ?)", v.merged_into_id, v.id), :distinct),
+        identified_visitors:
+          count(
+            fragment(
+              "CASE WHEN ? IS NOT NULL THEN coalesce(?, ?) END",
+              v.identified_at,
+              v.merged_into_id,
+              v.id
+            ),
+            :distinct
+          ),
         pageviews: filter(count(e.id), e.event_type == "pageview"),
         revenue:
           type(
@@ -323,8 +341,18 @@ defmodule GoodAnalytics.Core.Analytics do
     )
     |> repo.one(prefix: GoodAnalytics.schema_name())
     |> case do
-      nil -> %{visitors: 0, pageviews: 0, revenue: 0}
-      row -> %{row | pageviews: integer_value(row.pageviews), revenue: integer_value(row.revenue)}
+      nil ->
+        %{visitors: 0, pageviews: 0, revenue: 0, identification_rate: 0.0}
+
+      row ->
+        visitors = row.visitors
+
+        %{
+          visitors: visitors,
+          pageviews: integer_value(row.pageviews),
+          revenue: integer_value(row.revenue),
+          identification_rate: if(visitors > 0, do: row.identified_visitors / visitors, else: 0.0)
+        }
     end
   end
 
@@ -335,37 +363,6 @@ defmodule GoodAnalytics.Core.Analytics do
       select: count(fragment("coalesce(?, ?)", v.merged_into_id, v.id), :distinct)
     )
     |> repo.one(prefix: GoodAnalytics.schema_name())
-  end
-
-  # Simple in-window identification rate: identified canonical visitors active
-  # in the window over total canonical visitors active in the window.
-  defp identification_rate(repo, workspace_id, window) do
-    row =
-      from(e in Event,
-        join: v in Visitor,
-        on: v.id == e.visitor_id and v.workspace_id == e.workspace_id,
-        where: e.workspace_id == ^workspace_id,
-        where: e.inserted_at >= ^window.start_at and e.inserted_at < ^window.end_at,
-        select: %{
-          total: count(fragment("coalesce(?, ?)", v.merged_into_id, v.id), :distinct),
-          identified:
-            count(
-              fragment(
-                "CASE WHEN ? IS NOT NULL THEN coalesce(?, ?) END",
-                v.identified_at,
-                v.merged_into_id,
-                v.id
-              ),
-              :distinct
-            )
-        }
-      )
-      |> repo.one(prefix: GoodAnalytics.schema_name())
-
-    case row do
-      %{total: total, identified: identified} when total > 0 -> identified / total
-      _ -> 0.0
-    end
   end
 
   defp page_tally(repo, workspace_id, window, column) do

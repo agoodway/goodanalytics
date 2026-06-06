@@ -79,5 +79,23 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       assert kpis.identification_rate == 0.0
       assert kpis.sessions == 0
     end
+
+    test "folds identification_rate into the same scan as visitors and pageviews" do
+      # Guards the Task 1 refactor: identification_rate is now computed in the
+      # same ga_events JOIN ga_visitors scan as visitors/pageviews, so assert
+      # all three are mutually consistent from a single kpis/2 call.
+      identified = create_visitor!(%{identified_at: ~U[2026-06-05 00:00:00.000000Z]})
+      anon = create_visitor!(%{})
+
+      record_event!(identified, "pageview", %{path: "/a"})
+      record_event!(identified, "pageview", %{path: "/b"})
+      record_event!(anon, "pageview", %{path: "/c"})
+
+      kpis = Analytics.kpis(@ws, window: window())
+
+      assert kpis.visitors == 2
+      assert kpis.pageviews == 3
+      assert_in_delta kpis.identification_rate, 0.5, 0.0001
+    end
   end
 end

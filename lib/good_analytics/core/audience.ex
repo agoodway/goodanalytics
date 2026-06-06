@@ -121,6 +121,9 @@ defmodule GoodAnalytics.Core.Audience do
     session_metrics = Enum.filter(metrics, &(&1 in @session_metrics))
     validate_filter_session_support!(filters, session_metrics)
 
+    event_only? = session_metrics == []
+    session_only? = event_metrics == []
+
     event_rows =
       if event_metrics == [] and session_metrics != [] do
         []
@@ -128,6 +131,13 @@ defmodule GoodAnalytics.Core.Audience do
         base_event_query(workspace_id, from, to, filters)
         |> group_by_dimension(dim)
         |> select_event_metrics(dim, event_metrics)
+        |> push_sort_limit(
+          event_only? and order_metric in event_metrics,
+          order_metric,
+          order_dir,
+          limit,
+          &event_metric_expr/1
+        )
         |> repo.all(prefix: GoodAnalytics.schema_name())
       end
 
@@ -136,6 +146,13 @@ defmodule GoodAnalytics.Core.Audience do
         []
       else
         session_query(workspace_id, dim, from, to, filters, session_metrics)
+        |> push_sort_limit(
+          session_only? and order_metric in session_metrics,
+          order_metric,
+          order_dir,
+          limit,
+          &session_metric_expr/1
+        )
         |> repo.all(prefix: GoodAnalytics.schema_name())
       end
 
@@ -223,6 +240,18 @@ defmodule GoodAnalytics.Core.Audience do
 
   defp maybe_limit(rows, nil), do: rows
   defp maybe_limit(rows, limit) when is_integer(limit), do: Enum.take(rows, limit)
+
+  # For a single-grain request the top-N can be computed in SQL (no event/session
+  # merge to reconcile), so push ORDER BY + LIMIT down to bound the rows fetched.
+  # Guarded on the order metric belonging to this grain. The Elixir order_rows/3 +
+  # maybe_limit/2 still run afterward and are idempotent on the already-ordered/
+  # limited rows, preserving exact result semantics.
+  defp push_sort_limit(query, false = _pushable?, _metric, _dir, _limit, _expr_fun), do: query
+
+  defp push_sort_limit(query, true = _pushable?, order_metric, order_dir, limit, expr_fun) do
+    query = order_by(query, ^[{order_dir, expr_fun.(order_metric)}])
+    if is_integer(limit), do: limit(query, ^limit), else: query
+  end
 
   # ---- base query & grouping -----------------------------------------------
 
