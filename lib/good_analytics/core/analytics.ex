@@ -68,6 +68,19 @@ defmodule GoodAnalytics.Core.Analytics do
     link_id
   )a
 
+  @session_filter_fields ~w(
+    source_platform
+    source_medium
+    source_campaign
+    click_id
+    device_type
+    browser
+    os
+    entry_url
+    entry_page
+    exit_page
+  )a
+
   @doc "The supported breakdown/conversion dimensions, in declaration order."
   @spec breakdown_dimensions() :: [atom()]
   def breakdown_dimensions, do: @breakdown_dimensions
@@ -130,28 +143,30 @@ defmodule GoodAnalytics.Core.Analytics do
   Returns `%{sessions:, bounce_rate:, avg_duration:, engaged_rate:,
   entry_pages: %{path => count}, exit_pages: %{path => count}}`. Rates are
   floats in `0.0..1.0`; an empty window yields all-zero metrics and empty
-  page maps. Options: `:window` (required), `:include_page_tallies` (boolean,
-  default `true`; pass `false` to return only the headline aggregate without
-  `entry_pages`/`exit_pages`, saving two queries).
+  page maps. Options: `:window` (required), `:filters`,
+  `:include_page_tallies` (boolean, default `true`; pass `false` to return only
+  the headline aggregate without `entry_pages`/`exit_pages`, saving two
+  queries).
   """
   @spec session_metrics(Ecto.UUID.t(), keyword()) :: map()
   def session_metrics(workspace_id, opts) when is_binary(workspace_id) do
     window = TimeWindow.fetch!(opts)
+    filters = Keyword.get(opts, :filters, [])
     repo = Repo.repo()
 
-    aggregate = session_headline_metrics(repo, workspace_id, window)
+    aggregate = session_headline_metrics(repo, workspace_id, window, filters)
 
     if Keyword.get(opts, :include_page_tallies, true) do
       Map.merge(aggregate, %{
-        entry_pages: page_tally(repo, workspace_id, window, :entry_page),
-        exit_pages: page_tally(repo, workspace_id, window, :exit_page)
+        entry_pages: page_tally(repo, workspace_id, window, :entry_page, filters),
+        exit_pages: page_tally(repo, workspace_id, window, :exit_page, filters)
       })
     else
       aggregate
     end
   end
 
-  defp session_headline_metrics(repo, workspace_id, window) do
+  defp session_headline_metrics(repo, workspace_id, window, filters) do
     from(s in Session,
       where: s.workspace_id == ^workspace_id,
       where: s.started_at >= ^window.start_at and s.started_at < ^window.end_at,
@@ -162,6 +177,7 @@ defmodule GoodAnalytics.Core.Analytics do
         engaged_rate: type(coalesce(avg(fragment("(?)::int", s.is_engaged)), 0.0), :float)
       }
     )
+    |> apply_session_filters(filters)
     |> repo.one(prefix: GoodAnalytics.schema_name())
     |> case do
       nil -> %{sessions: 0, bounce_rate: 0.0, avg_duration: 0.0, engaged_rate: 0.0}
@@ -182,11 +198,14 @@ defmodule GoodAnalytics.Core.Analytics do
   @spec kpis(Ecto.UUID.t(), keyword()) :: map()
   def kpis(workspace_id, opts) when is_binary(workspace_id) do
     window = TimeWindow.fetch!(opts)
+    filters = Keyword.get(opts, :filters, [])
     repo = Repo.repo()
 
-    counts = active_event_metrics(repo, workspace_id, window)
-    new_visitors = new_visitors(repo, workspace_id, window)
-    sessions = session_metrics(workspace_id, window: window, include_page_tallies: false)
+    counts = active_event_metrics(repo, workspace_id, window, filters)
+    new_visitors = new_visitors(repo, workspace_id, window, filters)
+
+    sessions =
+      session_metrics(workspace_id, window: window, filters: filters, include_page_tallies: false)
 
     %{
       visitors: counts.visitors,
@@ -304,7 +323,7 @@ defmodule GoodAnalytics.Core.Analytics do
     end)
   end
 
-  defp active_event_metrics(repo, workspace_id, window) do
+  defp active_event_metrics(repo, workspace_id, window, filters) do
     from(e in Event,
       join: v in Visitor,
       on: v.id == e.visitor_id and v.workspace_id == e.workspace_id,
@@ -339,6 +358,7 @@ defmodule GoodAnalytics.Core.Analytics do
           )
       }
     )
+    |> apply_event_filters(filters)
     |> repo.one(prefix: GoodAnalytics.schema_name())
     |> case do
       nil ->
@@ -356,16 +376,20 @@ defmodule GoodAnalytics.Core.Analytics do
     end
   end
 
-  defp new_visitors(repo, workspace_id, window) do
-    from(v in Visitor,
-      where: v.workspace_id == ^workspace_id,
+  defp new_visitors(repo, workspace_id, window, filters) do
+    from(e in Event,
+      join: v in Visitor,
+      on: v.id == e.visitor_id and v.workspace_id == e.workspace_id,
+      where: e.workspace_id == ^workspace_id,
       where: v.first_seen_at >= ^window.start_at and v.first_seen_at < ^window.end_at,
+      where: e.inserted_at >= ^window.start_at and e.inserted_at < ^window.end_at,
       select: count(fragment("coalesce(?, ?)", v.merged_into_id, v.id), :distinct)
     )
+    |> apply_event_filters(filters)
     |> repo.one(prefix: GoodAnalytics.schema_name())
   end
 
-  defp page_tally(repo, workspace_id, window, column) do
+  defp page_tally(repo, workspace_id, window, column, filters) do
     from(s in Session,
       where: s.workspace_id == ^workspace_id,
       where: s.started_at >= ^window.start_at and s.started_at < ^window.end_at,
@@ -373,6 +397,7 @@ defmodule GoodAnalytics.Core.Analytics do
       group_by: field(s, ^column),
       select: {field(s, ^column), count(s.id)}
     )
+    |> apply_session_filters(filters)
     |> repo.all(prefix: GoodAnalytics.schema_name())
     |> Map.new()
   end
@@ -535,6 +560,83 @@ defmodule GoodAnalytics.Core.Analytics do
 
     query_timeseries(sql, workspace_id, window, interval, timezone, [])
   end
+
+  defp apply_session_filters(query, filters) do
+    filters
+    |> session_supported_filters()
+    |> Enum.reduce(query, &apply_session_filter/2)
+  end
+
+  defp session_supported_filters(filters) do
+    Enum.filter(filters, fn
+      {field, _value} -> session_filter_field?(field)
+      {field, _operator, _value} -> session_filter_field?(field)
+      _filter -> false
+    end)
+  end
+
+  defp session_filter_field?(field), do: field in @session_filter_fields
+
+  defp apply_session_filter({field, value}, query),
+    do: apply_session_filter({field, :eq, value}, query)
+
+  defp apply_session_filter({field, operator, value}, query) do
+    session_filter_condition(query, field, operator, value)
+  end
+
+  defp session_filter_condition(query, :click_id, :eq, value)
+       when is_binary(value) and value != "",
+       do: where(query, [s], fragment("?::text", field(s, ^:click_id)) == ^value)
+
+  defp session_filter_condition(query, :click_id, :neq, value)
+       when is_binary(value) and value != "",
+       do: where(query, [s], fragment("?::text", field(s, ^:click_id)) != ^value)
+
+  defp session_filter_condition(query, :click_id, :in, values)
+       when is_list(values) and values != [] do
+    values = Enum.map(values, &to_string/1)
+    where(query, [s], fragment("?::text", field(s, ^:click_id)) in ^values)
+  end
+
+  defp session_filter_condition(query, :click_id, :not_in, values)
+       when is_list(values) and values != [] do
+    values = Enum.map(values, &to_string/1)
+    where(query, [s], fragment("?::text", field(s, ^:click_id)) not in ^values)
+  end
+
+  defp session_filter_condition(query, :click_id, :ilike, value)
+       when is_binary(value) and value != "" do
+    pattern = "%" <> escape_like(value) <> "%"
+    where(query, [s], fragment("?::text ILIKE ? ESCAPE '\\'", field(s, ^:click_id), ^pattern))
+  end
+
+  defp session_filter_condition(query, field, :eq, value)
+       when is_binary(value) and value != "",
+       do: where(query, [s], field(s, ^field) == ^value)
+
+  defp session_filter_condition(query, field, :neq, value)
+       when is_binary(value) and value != "",
+       do: where(query, [s], field(s, ^field) != ^value)
+
+  defp session_filter_condition(query, field, :in, values)
+       when is_list(values) and values != [] do
+    values = Enum.map(values, &to_string/1)
+    where(query, [s], field(s, ^field) in ^values)
+  end
+
+  defp session_filter_condition(query, field, :not_in, values)
+       when is_list(values) and values != [] do
+    values = Enum.map(values, &to_string/1)
+    where(query, [s], field(s, ^field) not in ^values)
+  end
+
+  defp session_filter_condition(query, field, :ilike, value)
+       when is_binary(value) and value != "" do
+    pattern = "%" <> escape_like(value) <> "%"
+    where(query, [s], fragment("? ILIKE ? ESCAPE '\\'", field(s, ^field), ^pattern))
+  end
+
+  defp session_filter_condition(query, _field, _operator, _value), do: query
 
   # Applies filters to a sale-event Ecto query as WHERE conditions, matching
   # `build_timeseries_condition/4`'s operator semantics but as Ecto expressions.
