@@ -119,6 +119,7 @@ defmodule GoodAnalytics.Core.Audience do
 
     event_metrics = Enum.filter(metrics, &(&1 in @event_metrics))
     session_metrics = Enum.filter(metrics, &(&1 in @session_metrics))
+    validate_filter_session_support!(filters, session_metrics)
 
     event_rows =
       if event_metrics == [] and session_metrics != [] do
@@ -175,6 +176,21 @@ defmodule GoodAnalytics.Core.Audience do
   end
 
   defp validate_session_support!(_dim, _metrics), do: :ok
+
+  defp validate_filter_session_support!(_filters, []), do: :ok
+
+  defp validate_filter_session_support!(filters, _session_metrics) do
+    Enum.each(filters, fn {field, _value} ->
+      case fetch_dimension!(field) do
+        %{session_column: nil} ->
+          raise ArgumentError,
+                "filter on #{inspect(field)} cannot be combined with session metrics"
+
+        _ ->
+          :ok
+      end
+    end)
+  end
 
   defp order_spec(opts, metrics) do
     default_metric = List.first(metrics)

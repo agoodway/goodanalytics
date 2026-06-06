@@ -247,6 +247,18 @@ defmodule GoodAnalytics.Core.AudienceTest do
     end
   end
 
+  describe "breakdown/3 — filter + session metric validation" do
+    test "raises when a session metric is requested with a filter on a session-less dimension" do
+      assert_raise ArgumentError, fn ->
+        Audience.breakdown(@ws, :device_type,
+          window: window(),
+          metrics: [:sessions],
+          filters: [country: "US"]
+        )
+      end
+    end
+  end
+
   describe "breakdown/3 — session-grain metrics" do
     alias GoodAnalytics.Core.Sessions.Session
 
