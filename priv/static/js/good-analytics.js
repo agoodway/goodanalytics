@@ -1,7 +1,12 @@
 (function() {
   'use strict';
 
-  if (typeof window.GoodAnalytics !== 'undefined' && window.GoodAnalytics._spaNavigationSetup) {
+  if (
+    typeof window.GoodAnalytics !== 'undefined' &&
+    (window.GoodAnalytics._initialized ||
+      window.GoodAnalytics._spaNavigationSetup ||
+      window.GoodAnalytics._engagementSetup)
+  ) {
     console.warn('GoodAnalytics: detected duplicate snippet load; skipping init');
     return;
   }
@@ -23,6 +28,8 @@
       refParam: 'ref',
       cleanUrl: true,
       dedupWindow: 30 * 60 * 1000, // 30 minutes
+      engagement: true,
+      engagementThrottleMs: 3000,
       autoSpaNavigation: true,
       workspaceId: null
     },
@@ -39,6 +46,9 @@
      * deduplicate retried beacons before forwarding them to the event recorder.
      */
     init: function(userConfig) {
+      if (this._initialized) return this;
+      this._initialized = true;
+
       if (userConfig) {
         for (var key in userConfig) {
           if (userConfig.hasOwnProperty(key)) {
@@ -89,6 +99,10 @@
       }
 
       this._setupSpaNavigation();
+
+      if (this.config.engagement !== false) {
+        this._setupEngagement();
+      }
 
       // A fingerprint may be supplied at init time (e.g. precomputed server-side
       // or cached). Async sources should call setFingerprint() once ready.
@@ -443,6 +457,113 @@
 
       this._lastSpaPageview = {url: url, at: now};
       this.track('pageview');
+    },
+
+    // Engagement tracking accrues active time only while the page is both
+    // visible and focused, then flushes an engagement beacon on hide/unload.
+    _setupEngagement: function() {
+      if (this._engagementSetup) return;
+      this._engagementSetup = true;
+
+      this._engagedMs = 0;
+      this._reportedMs = 0;
+      this._maxScrollDepth = 0;
+      this._observedScrollDepth = 0;
+      this._activeSince = null;
+
+      var self = this;
+
+      this._isActive = function() {
+        return document.visibilityState === 'visible' && document.hasFocus();
+      };
+
+      this._resumeEngagement = function() {
+        if (self._activeSince === null && self._isActive()) {
+          self._activeSince = Date.now();
+        }
+      };
+
+      this._accrueEngagement = function() {
+        if (self._activeSince !== null) {
+          self._engagedMs += Date.now() - self._activeSince;
+          self._activeSince = null;
+        }
+      };
+
+      this._currentScrollDepth = function() {
+        var doc = document.documentElement;
+        var scrollable = doc.scrollHeight - doc.clientHeight;
+        if (scrollable <= 0) return 100;
+        var pct = Math.round((doc.scrollTop / scrollable) * 100);
+        return Math.max(0, Math.min(100, pct));
+      };
+
+      this._updateScrollDepth = function() {
+        var depth = self._currentScrollDepth();
+        if (depth > self._observedScrollDepth) self._observedScrollDepth = depth;
+      };
+
+      this._flushEngagement = function() {
+        self._accrueEngagement();
+        self._updateScrollDepth();
+
+        var depth = self._observedScrollDepth;
+        var deltaMs = self._engagedMs - self._reportedMs;
+        var deeper = depth > self._maxScrollDepth;
+
+        if (deltaMs < self.config.engagementThrottleMs && !deeper) return;
+
+        if (self._sendEngagement(Math.max(0, deltaMs), depth)) {
+          if (depth > self._maxScrollDepth) self._maxScrollDepth = depth;
+          self._reportedMs = self._engagedMs;
+        }
+      };
+
+      this._updateScrollDepth();
+      window.addEventListener('scroll', this._updateScrollDepth, false);
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+          self._flushEngagement();
+        } else {
+          self._resumeEngagement();
+        }
+      });
+      window.addEventListener('focus', this._resumeEngagement);
+      window.addEventListener('blur', this._accrueEngagement);
+      window.addEventListener('pagehide', this._flushEngagement);
+
+      this._resumeEngagement();
+    },
+
+    _sendEngagement: function(engagedMs, scrollDepth) {
+      var payload = {
+        event_id: this._uuidv4(),
+        event_type: 'engagement',
+        ga_id: this.getIdentity(),
+        anonymous_id: this.getAnonymousId(),
+        url: window.location.href,
+        engaged_ms: engagedMs,
+        scroll_depth: scrollDepth,
+        timestamp: new Date().toISOString()
+      };
+      if (this._fingerprint) payload.fingerprint = this._fingerprint;
+      if (this.config.workspaceId) payload.workspace_id = this.config.workspaceId;
+
+      var blob = new Blob([JSON.stringify(payload)], {type: 'application/json'});
+      if (navigator.sendBeacon) {
+        if (navigator.sendBeacon(this.config.endpoint + '/event', blob)) return true;
+      }
+
+      if (window.fetch) {
+        fetch(this.config.endpoint + '/event', {
+          method: 'POST',
+          body: blob,
+          keepalive: true
+        });
+        return true;
+      }
+
+      return false;
     },
 
     // Client-side dedup

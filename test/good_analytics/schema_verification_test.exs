@@ -149,6 +149,7 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         link_id click_id url referrer referrer_url
         source_platform source_medium source_campaign source
         fingerprint ip_address user_agent
+        device_type browser os browser_version os_version device_brand device_model bot_name
         amount_cents currency properties
         connector_source_context
         host path
@@ -176,6 +177,9 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         idx_ga_events_workspace
         idx_ga_events_click_id
         idx_ga_events_source
+        idx_ga_events_workspace_device_type
+        idx_ga_events_workspace_browser
+        idx_ga_events_workspace_os
       )
 
       for idx <- expected do
@@ -344,6 +348,25 @@ defmodule GoodAnalytics.SchemaVerificationTest do
     test "has unique constraint on (workspace_id, key)" do
       indexes = index_names("ga_settings")
       assert "ga_settings_workspace_id_key_key" in indexes
+    end
+  end
+
+  describe "ga_sessions" do
+    test "has the per-dimension breakdown indexes" do
+      indexes = index_names("ga_sessions")
+
+      expected = ~w(
+        idx_ga_sessions_workspace_device_type_started
+        idx_ga_sessions_workspace_browser_started
+        idx_ga_sessions_workspace_os_started
+        idx_ga_sessions_workspace_source_platform_started
+        idx_ga_sessions_workspace_source_medium_started
+        idx_ga_sessions_workspace_source_campaign_started
+      )
+
+      for idx <- expected do
+        assert idx in indexes, "Missing index: #{idx}"
+      end
     end
   end
 end

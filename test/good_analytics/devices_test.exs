@@ -7,8 +7,6 @@ defmodule GoodAnalytics.DevicesTest do
              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   @iphone "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " <>
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-  @ipad "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " <>
-          "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
   @googlebot "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
   describe "parse/1" do
@@ -93,6 +91,47 @@ defmodule GoodAnalytics.DevicesTest do
       refute Devices.bot?(@desktop)
       refute Devices.bot?(nil)
       refute Devices.bot?("")
+    end
+  end
+
+  describe "to_event_attrs/1" do
+    test "maps a parsed desktop device map to event columns" do
+      attrs = @desktop |> Devices.parse() |> Devices.to_event_attrs()
+
+      assert attrs.device_type == "desktop"
+      assert attrs.browser == "Chrome"
+      assert attrs.os == "Mac"
+      assert is_binary(attrs.browser_version)
+      assert Map.has_key?(attrs, :os_version)
+    end
+
+    test "maps device brand and model when present" do
+      attrs = @iphone |> Devices.parse() |> Devices.to_event_attrs()
+
+      assert attrs.device_type == "smartphone"
+      # iPhone reports brand Apple via UAInspector
+      assert attrs.device_brand == "Apple"
+      assert attrs.device_model == "iPhone"
+    end
+
+    test "maps a bot map to device_type bot with bot_name" do
+      attrs = @googlebot |> Devices.parse() |> Devices.to_event_attrs()
+
+      assert attrs.device_type == "bot"
+      assert attrs.bot_name =~ "Googlebot"
+    end
+
+    test "returns an empty map for a blank/empty device map" do
+      assert Devices.to_event_attrs(%{}) == %{}
+      assert Devices.to_event_attrs(nil) == %{}
+    end
+
+    test "omits columns whose source key is absent (leaves them NULL)" do
+      attrs = Devices.to_event_attrs(%{"type" => "desktop", "browser" => "Firefox"})
+
+      assert attrs == %{device_type: "desktop", browser: "Firefox"}
+      refute Map.has_key?(attrs, :os)
+      refute Map.has_key?(attrs, :bot_name)
     end
   end
 end

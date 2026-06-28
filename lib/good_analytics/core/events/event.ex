@@ -34,6 +34,7 @@ defmodule GoodAnalytics.Core.Events.Event do
 
     field(:workspace_id, Ecto.UUID)
     field(:visitor_id, Ecto.UUID)
+    field(:session_id, Ecto.UUID)
 
     # Event classification
     field(:event_type, :string)
@@ -66,6 +67,16 @@ defmodule GoodAnalytics.Core.Events.Event do
     field(:ip_address, EctoNetwork.INET)
     field(:user_agent, :string)
 
+    # Device context (event-grain, parsed from user_agent at ingest)
+    field(:device_type, :string)
+    field(:browser, :string)
+    field(:os, :string)
+    field(:browser_version, :string)
+    field(:os_version, :string)
+    field(:device_brand, :string)
+    field(:device_model, :string)
+    field(:bot_name, :string)
+
     # Promoted properties
     field(:amount_cents, :integer)
     field(:currency, :string)
@@ -85,6 +96,7 @@ defmodule GoodAnalytics.Core.Events.Event do
   @required_fields [:workspace_id, :visitor_id, :event_type]
   @optional_fields [
     :event_name,
+    :session_id,
     :link_id,
     :click_id,
     :partner_id,
@@ -102,6 +114,14 @@ defmodule GoodAnalytics.Core.Events.Event do
     :fingerprint,
     :ip_address,
     :user_agent,
+    :device_type,
+    :browser,
+    :os,
+    :browser_version,
+    :os_version,
+    :device_brand,
+    :device_model,
+    :bot_name,
     :amount_cents,
     :currency,
     :properties,
