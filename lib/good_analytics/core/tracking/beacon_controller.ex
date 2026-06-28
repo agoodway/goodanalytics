@@ -22,6 +22,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   @max_fingerprint_length 128
   @max_event_name_length 100
   @max_anonymous_id_length 128
+  @max_engaged_ms 30 * 60 * 1000
   # Maximum number of event properties preserved after sanitization.
   @max_properties 50
 
@@ -45,13 +46,24 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   def event(conn, params) do
     workspace_id = workspace_id(conn, params)
     source = ga_source(conn, params)
+    event_type = Map.get(params, "event_type", "pageview")
 
-    signals = %{
-      ga_id: Map.get(params, "ga_id"),
-      fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-      anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
-      source: source
-    }
+    cond do
+      event_type not in Event.ingest_types() ->
+        conn
+        |> put_status(422)
+        |> json(%{status: "error", message: "invalid event_type"})
+
+      event_type == "engagement" ->
+        handle_engagement_event(conn, params, workspace_id, source)
+
+      true ->
+        handle_standard_event(conn, params, workspace_id, source, event_type)
+    end
+  end
+
+  defp handle_standard_event(conn, params, workspace_id, source, event_type) do
+    signals = tracking_signals(params, source)
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
       {:ok, visitor} ->
@@ -63,49 +75,65 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
             validate_fingerprint(Map.get(params, "fingerprint"))
           )
 
-        event_type = Map.get(params, "event_type", "pageview")
+        if reconcile_only? do
+          json(conn, %{status: "ok"})
+        else
+          # Extract connector signals from JS payload and merge with server signals
+          js_signals = Signals.extract_from_payload(params)
 
-        cond do
-          event_type not in Event.ingest_types() ->
-            conn
-            |> put_status(422)
-            |> json(%{status: "error", message: "invalid event_type"})
+          server_signals = connector_signals(conn.assigns[:ga_signals])
+          connector_signals = Signals.merge([server_signals, js_signals])
 
-          reconcile_only? ->
-            json(conn, %{status: "ok"})
+          # Derive referral context from payload token or visitor state
+          referral_attrs = derive_referral_context(visitor, params)
 
-          true ->
-            # Extract connector signals from JS payload and merge with server signals
-            js_signals = Signals.extract_from_payload(params)
+          event_attrs =
+            %{
+              url: sanitize_url(Map.get(params, "url")),
+              referrer: sanitize_url(Map.get(params, "referrer")),
+              event_name: validate_event_name(Map.get(params, "event_name")),
+              source: source,
+              properties: sanitize_properties(Map.get(params, "properties", %{})),
+              event_id: validate_event_id(Map.get(params, "event_id")),
+              fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
+              ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
+              user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
+              connector_signals: connector_signals
+            }
+            |> Map.merge(referral_attrs)
 
-            server_signals = connector_signals(conn.assigns[:ga_signals])
-            connector_signals = Signals.merge([server_signals, js_signals])
-
-            # Derive referral context from payload token or visitor state
-            referral_attrs = derive_referral_context(visitor, params)
-
-            event_attrs =
-              %{
-                url: sanitize_url(Map.get(params, "url")),
-                referrer: sanitize_url(Map.get(params, "referrer")),
-                event_name: validate_event_name(Map.get(params, "event_name")),
-                source: source,
-                properties: sanitize_properties(Map.get(params, "properties", %{})),
-                event_id: validate_event_id(Map.get(params, "event_id")),
-                fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-                ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
-                user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
-                connector_signals: connector_signals
-              }
-              |> Map.merge(referral_attrs)
-
-            Recorder.record(visitor, event_type, event_attrs)
-            Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
-            json(conn, %{status: "ok"})
+          Recorder.record(visitor, event_type, event_attrs)
+          Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
+          json(conn, %{status: "ok"})
         end
 
       {:error, reason} ->
         Logger.warning("GoodAnalytics: identity resolution failed in beacon: #{inspect(reason)}")
+        json(conn, %{status: "ok"})
+    end
+  end
+
+  defp handle_engagement_event(conn, params, workspace_id, source) do
+    params
+    |> tracking_signals(source)
+    |> IdentityResolver.find_candidates(workspace_id)
+    |> case do
+      [] ->
+        json(conn, %{status: "ok"})
+
+      [_first, _second | _rest] ->
+        json(conn, %{status: "ok"})
+
+      [visitor] ->
+        event_attrs = %{
+          url: sanitize_url(Map.get(params, "url")),
+          properties: sanitize_properties(Map.get(params, "properties", %{})),
+          anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
+          engaged_ms: validate_engaged_ms(Map.get(params, "engaged_ms")),
+          scroll_depth: validate_scroll_depth(Map.get(params, "scroll_depth"))
+        }
+
+        _ = Recorder.record(visitor, "engagement", event_attrs)
         json(conn, %{status: "ok"})
     end
   end
@@ -291,6 +319,15 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
   defp connector_signals(_signals), do: %{}
 
+  defp tracking_signals(params, source) do
+    %{
+      ga_id: Map.get(params, "ga_id"),
+      fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
+      anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
+      source: source
+    }
+  end
+
   defp request_host(%Plug.Conn{host: host, port: port}) when port in [80, 443], do: host
 
   defp request_host(%Plug.Conn{host: host, port: port}) when is_integer(port),
@@ -340,6 +377,22 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp validate_event_id(_), do: nil
+
+  defp validate_engaged_ms(value) when is_integer(value) and value >= 0,
+    do: min(value, @max_engaged_ms)
+
+  defp validate_engaged_ms(value) when is_float(value) and value >= 0,
+    do: value |> trunc() |> min(@max_engaged_ms)
+
+  defp validate_engaged_ms(_), do: nil
+
+  defp validate_scroll_depth(value) when is_integer(value) and value >= 0 and value <= 100,
+    do: value
+
+  defp validate_scroll_depth(value) when is_float(value) and value >= 0 and value <= 100,
+    do: trunc(value)
+
+  defp validate_scroll_depth(_), do: nil
 
   defp sanitize_properties(props) when is_map(props) do
     props

@@ -16,6 +16,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   """
 
   alias GoodAnalytics.Core.Events.Event
+  alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Hooks
@@ -236,6 +237,12 @@ defmodule GoodAnalytics.Core.IdentityResolver do
         :reassign_events,
         from(e in Event, where: e.visitor_id in ^duplicate_ids),
         [set: [visitor_id: primary.id]],
+        prefix: GoodAnalytics.schema_name()
+      )
+      |> Ecto.Multi.update_all(
+        :reassign_sessions,
+        from(s in Session, where: s.visitor_id in ^duplicate_ids),
+        [set: [visitor_id: primary.id, updated_at: DateTime.utc_now()]],
         prefix: GoodAnalytics.schema_name()
       )
       |> Ecto.Multi.update_all(
