@@ -17,6 +17,7 @@ defmodule GoodAnalytics.Core.Funnels.CohortSourceFilter do
     field(:campaign, :string)
   end
 
+  @doc "Builds a changeset for cohort source filter attributes."
   def changeset(filter, attrs) do
     filter
     |> cast(attrs, [:platform, :medium, :campaign])

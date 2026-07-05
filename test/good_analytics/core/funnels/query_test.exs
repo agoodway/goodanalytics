@@ -1,7 +1,7 @@
 defmodule GoodAnalytics.Core.Funnels.QueryTest do
   use ExUnit.Case, async: true
 
-  alias GoodAnalytics.Core.Funnels.{Funnel, Query, Step, Filter}
+  alias GoodAnalytics.Core.Funnels.{Filter, Funnel, Query, Step}
 
   @workspace_id "00000000-0000-0000-0000-000000000001"
 

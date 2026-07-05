@@ -37,6 +37,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
 
   # ── OpenApiSpex operations ──
 
+  @doc false
   def open_api_operation(:breakdown) do
     %Operation{
       tags: ["Analytics"],
@@ -108,6 +109,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
     }
   end
 
+  @doc false
   def open_api_operation(:timeseries) do
     %Operation{
       tags: ["Analytics"],
@@ -167,6 +169,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
     }
   end
 
+  @doc false
   def open_api_operation(:summary) do
     %Operation{
       tags: ["Analytics"],
@@ -209,6 +212,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
 
   # ── Actions ──
 
+  @doc false
   def breakdown(conn, params) do
     workspace_id = conn.assigns.workspace_id
     dimension = String.to_existing_atom(params.dimension)
@@ -245,6 +249,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
     e in ArgumentError -> {:error, sanitize_message(Exception.message(e))}
   end
 
+  @doc false
   def timeseries(conn, params) do
     metric = String.to_existing_atom(params.metric)
     interval = resolve_interval(params)
@@ -279,6 +284,7 @@ defmodule GoodAnalytics.Api.AnalyticsController do
       {:error, "invalid timezone: #{Map.get(params, :timezone, "Etc/UTC")}"}
   end
 
+  @doc false
   def summary(conn, params) do
     case validate_window(params) do
       :ok -> json(conn, Analytics.kpis(conn.assigns.workspace_id, window: window(params)))
