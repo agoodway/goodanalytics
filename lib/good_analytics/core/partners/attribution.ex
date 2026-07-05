@@ -6,8 +6,8 @@ defmodule GoodAnalytics.Core.Partners.Attribution do
   functions used by the redirect and beacon click flows.
   """
 
-  alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Core.Tracking.ReferralCookie
+  alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Repo
 
   import Ecto.Query

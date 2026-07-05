@@ -180,6 +180,7 @@ defmodule GoodAnalytics.SchemaVerificationTest do
         idx_ga_events_workspace_device_type
         idx_ga_events_workspace_browser
         idx_ga_events_workspace_os
+        idx_ga_events_partner
       )
 
       for idx <- expected do

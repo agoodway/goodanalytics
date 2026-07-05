@@ -114,17 +114,19 @@ defmodule GoodAnalytics.Core.Events do
   """
   @spec get_event(Ecto.UUID.t(), Ecto.UUID.t()) :: Event.t() | nil
   def get_event(workspace_id, event_id) do
-    with {:ok, _} <- Ecto.UUID.cast(event_id) do
-      repo = Repo.repo()
+    case Ecto.UUID.cast(event_id) do
+      {:ok, _} ->
+        repo = Repo.repo()
 
-      from(e in Event,
-        where: e.workspace_id == ^workspace_id,
-        where: e.id == ^event_id,
-        limit: 1
-      )
-      |> repo.one(prefix: GoodAnalytics.schema_name())
-    else
-      _ -> nil
+        from(e in Event,
+          where: e.workspace_id == ^workspace_id,
+          where: e.id == ^event_id,
+          limit: 1
+        )
+        |> repo.one(prefix: GoodAnalytics.schema_name())
+
+      :error ->
+        nil
     end
   end
 

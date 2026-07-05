@@ -115,8 +115,7 @@ defmodule GoodAnalytics.Core.Funnels.Query do
 
   defp build_final_select(step_count) do
     unions =
-      1..step_count
-      |> Enum.map(fn index ->
+      Enum.map_join(1..step_count, " UNION ALL ", fn index ->
         median_expr =
           if index == step_count do
             "EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s#{index}.step_at - s1.step_at))::FLOAT"
@@ -139,7 +138,6 @@ defmodule GoodAnalytics.Core.Funnels.Query do
         #{if index > 1, do: join_step_1, else: ""}
         """
       end)
-      |> Enum.join(" UNION ALL ")
 
     "SELECT * FROM (#{unions}) t ORDER BY step_index"
   end

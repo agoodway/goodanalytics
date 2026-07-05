@@ -1,4 +1,11 @@
 defmodule GoodAnalytics.Api.PartnerController do
+  @moduledoc """
+  Workspace-scoped REST endpoints for referral partner management.
+
+  Partners are created, listed, updated, and archived within the authenticated
+  API key's workspace.
+  """
+
   use Phoenix.Controller, formats: [:json]
 
   alias GoodAnalytics.Api.Schemas
@@ -10,6 +17,7 @@ defmodule GoodAnalytics.Api.PartnerController do
 
   # ── OpenApiSpex Operations ──
 
+  @doc false
   def open_api_operation(:create) do
     %Operation{
       tags: ["Partners"],
@@ -27,6 +35,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     }
   end
 
+  @doc false
   def open_api_operation(:index) do
     %Operation{
       tags: ["Partners"],
@@ -56,6 +65,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     }
   end
 
+  @doc false
   def open_api_operation(:show) do
     %Operation{
       tags: ["Partners"],
@@ -71,6 +81,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     }
   end
 
+  @doc false
   def open_api_operation(:update) do
     %Operation{
       tags: ["Partners"],
@@ -94,6 +105,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     }
   end
 
+  @doc false
   def open_api_operation(:delete) do
     %Operation{
       tags: ["Partners"],
@@ -113,6 +125,7 @@ defmodule GoodAnalytics.Api.PartnerController do
 
   @max_limit 200
 
+  @doc false
   def create(conn, _params) do
     workspace_id = conn.assigns.workspace_id
     attrs = conn.body_params |> to_plain_map() |> Map.put(:workspace_id, workspace_id)
@@ -139,6 +152,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     end
   end
 
+  @doc false
   def index(conn, params) do
     workspace_id = conn.assigns.workspace_id
     limit = min(Map.get(params, :limit, 50), @max_limit)
@@ -148,6 +162,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     json(conn, Enum.map(partners, &serialize_partner/1))
   end
 
+  @doc false
   def show(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -157,6 +172,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     end
   end
 
+  @doc false
   def update(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -177,6 +193,7 @@ defmodule GoodAnalytics.Api.PartnerController do
     end
   end
 
+  @doc false
   def delete(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 

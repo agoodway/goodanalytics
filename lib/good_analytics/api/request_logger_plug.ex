@@ -128,19 +128,7 @@ defmodule GoodAnalytics.Api.RequestLoggerPlug do
 
       case IdentityResolver.resolve(resolved_signals, workspace_id: workspace_id) do
         {:ok, visitor} ->
-          case Recorder.record(visitor, "api_request", %{
-                 event_name: event_name,
-                 url: url,
-                 properties: properties
-               }) do
-            {:ok, _event} ->
-              :ok
-
-            {:error, changeset} ->
-              Logger.error(
-                "RequestLoggerPlug: failed to record event: #{inspect(changeset.errors, limit: 3)}"
-              )
-          end
+          record_api_request(visitor, event_name, url, properties)
 
         {:error, reason} ->
           Logger.error(
@@ -158,6 +146,22 @@ defmodule GoodAnalytics.Api.RequestLoggerPlug do
       Logger.error(
         "RequestLoggerPlug: unexpected error in recording task: #{Exception.message(error)}"
       )
+  end
+
+  defp record_api_request(visitor, event_name, url, properties) do
+    case Recorder.record(visitor, "api_request", %{
+           event_name: event_name,
+           url: url,
+           properties: properties
+         }) do
+      {:ok, _event} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.error(
+          "RequestLoggerPlug: failed to record event: #{inspect(changeset.errors, limit: 3)}"
+        )
+    end
   end
 
   defp sanitize_path(path) do

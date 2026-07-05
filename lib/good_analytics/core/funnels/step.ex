@@ -23,6 +23,7 @@ defmodule GoodAnalytics.Core.Funnels.Step do
 
   @kinds ~w(event url property source)
 
+  @doc "Builds a changeset for a funnel step and its embedded filters."
   def changeset(step, attrs) do
     step
     |> cast(attrs, [:kind, :label, :combine])

@@ -1,4 +1,11 @@
 defmodule GoodAnalytics.Api.EventController do
+  @moduledoc """
+  Workspace-scoped REST endpoints for recording server-side events.
+
+  Requests are authenticated upstream and validated through OpenAPI schemas
+  before events are resolved to visitors and recorded through the core recorder.
+  """
+
   use Phoenix.Controller, formats: [:json]
 
   alias GoodAnalytics.Api.Schemas
@@ -16,6 +23,7 @@ defmodule GoodAnalytics.Api.EventController do
 
   # ── OpenApiSpex Operations ──
 
+  @doc false
   def open_api_operation(:create) do
     %Operation{
       tags: ["Events"],
@@ -37,6 +45,7 @@ defmodule GoodAnalytics.Api.EventController do
     }
   end
 
+  @doc false
   def open_api_operation(:batch) do
     %Operation{
       tags: ["Events"],
@@ -67,6 +76,7 @@ defmodule GoodAnalytics.Api.EventController do
 
   # ── Actions ──
 
+  @doc false
   def create(conn, _params) do
     workspace_id = conn.assigns.workspace_id
     body = to_plain_map(conn.body_params)
@@ -88,6 +98,7 @@ defmodule GoodAnalytics.Api.EventController do
     end
   end
 
+  @doc false
   def batch(conn, _params) do
     workspace_id = conn.assigns.workspace_id
     %{events: events} = to_plain_map(conn.body_params)
