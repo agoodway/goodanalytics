@@ -15,6 +15,7 @@ defmodule GoodAnalytics.Core.Tracking.Router do
 
   pipeline :tracking_api do
     plug(:accepts, ["json"])
+    plug(:fetch_cookies)
 
     plug(Plug.Parsers,
       parsers: [:json],

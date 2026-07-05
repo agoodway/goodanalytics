@@ -1,6 +1,17 @@
 defmodule GoodAnalytics.Core.Tracking.BeaconController do
   @moduledoc """
   Handles beacon POSTs from the JS client and client-side click tracking.
+
+  ## Anonymous identity (`_ga_anon`)
+
+  When a request body omits `anonymous_id`, the controller falls back to the
+  `_ga_anon` cookie (see `resolve_anonymous_id/2`). Treat this cookie as a
+  **weak, client-forgeable identity signal**: it is set server-side with
+  `http_only: true` + `same_site: "Lax"` (mitigating XSS theft and CSRF) and
+  carries a 128-bit random id (infeasible to guess), but it is unsigned, so a
+  client with direct cookie access can still present an arbitrary value. It is
+  only ever used as a weak signal for visitor resolution/merging alongside a
+  fingerprint — never as authorization or for any privileged decision.
   """
 
   # NOTE: Rate limiting is expected at the infrastructure level (nginx, CloudFlare, etc.).
@@ -22,6 +33,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   @max_fingerprint_length 128
   @max_event_name_length 100
   @max_anonymous_id_length 128
+  @anon_cookie "_ga_anon"
   @max_engaged_ms 30 * 60 * 1000
   # Maximum number of event properties preserved after sanitization.
   @max_properties 50
@@ -63,7 +75,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp handle_standard_event(conn, params, workspace_id, source, event_type) do
-    signals = tracking_signals(params, source)
+    signals = tracking_signals(conn, params, source)
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
       {:ok, visitor} ->
@@ -114,8 +126,8 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp handle_engagement_event(conn, params, workspace_id, source) do
-    params
-    |> tracking_signals(source)
+    conn
+    |> tracking_signals(params, source)
     |> IdentityResolver.find_candidates(workspace_id)
     |> case do
       [] ->
@@ -128,7 +140,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         event_attrs = %{
           url: sanitize_url(Map.get(params, "url")),
           properties: sanitize_properties(Map.get(params, "properties", %{})),
-          anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
+          anonymous_id: resolve_anonymous_id(conn, params),
           engaged_ms: validate_engaged_ms(Map.get(params, "engaged_ms")),
           scroll_depth: validate_scroll_depth(Map.get(params, "scroll_depth"))
         }
@@ -190,7 +202,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
     signals = %{
       click_id: click_id,
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-      anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
+      anonymous_id: resolve_anonymous_id(conn, params),
       source: source
     }
 
@@ -319,14 +331,30 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
 
   defp connector_signals(_signals), do: %{}
 
-  defp tracking_signals(params, source) do
+  defp tracking_signals(conn, params, source) do
     %{
       ga_id: Map.get(params, "ga_id"),
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-      anonymous_id: validate_anonymous_id(Map.get(params, "anonymous_id")),
+      anonymous_id: resolve_anonymous_id(conn, params),
       source: source
     }
   end
+
+  # Resolves the anonymous id from the request body, falling back to the
+  # `_ga_anon` cookie. A body value that is absent OR present-but-invalid
+  # (blank, whitespace, or over the length cap) is treated the same — it fails
+  # `validate_anonymous_id/1` and yields the cookie value. Both sources are
+  # client-controlled, so no new trust boundary is crossed; see the moduledoc.
+  defp resolve_anonymous_id(conn, params) do
+    body = validate_anonymous_id(Map.get(params, "anonymous_id"))
+    cookie = validate_anonymous_id(cookie_value(conn, @anon_cookie))
+    body || cookie
+  end
+
+  # Direct-controller call sites may pass a conn whose cookies were never
+  # fetched (a `%Plug.Conn.Unfetched{}` struct); treat that as no cookie.
+  defp cookie_value(%Plug.Conn{cookies: %Plug.Conn.Unfetched{}}, _name), do: nil
+  defp cookie_value(%Plug.Conn{cookies: cookies}, name), do: Map.get(cookies, name)
 
   defp request_host(%Plug.Conn{host: host, port: port}) when port in [80, 443], do: host
 
