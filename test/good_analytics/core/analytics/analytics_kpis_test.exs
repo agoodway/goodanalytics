@@ -10,6 +10,8 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
     %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
   end
 
+  defp event_time, do: ~U[2026-06-10 12:00:00.000000Z]
+
   defp insert_session!(attrs) do
     now = ~U[2026-06-10 12:00:00.000000Z]
 
@@ -30,8 +32,9 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       twitter_visitor = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
       google_visitor = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
 
-      record_event!(twitter_visitor, "pageview", %{platform: "twitter"})
-      record_event!(google_visitor, "pageview", %{platform: "google"})
+      record_event!(twitter_visitor, "pageview", %{platform: "twitter", inserted_at: event_time()})
+
+      record_event!(google_visitor, "pageview", %{platform: "google", inserted_at: event_time()})
 
       kpis = Analytics.kpis(@ws, window: window(), filters: [{:source_platform, :eq, "twitter"}])
 
@@ -43,8 +46,8 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
     test "no filters counts everything" do
       visitor = create_visitor!(%{})
 
-      record_event!(visitor, "pageview", %{platform: "twitter"})
-      record_event!(visitor, "pageview", %{platform: "google"})
+      record_event!(visitor, "pageview", %{platform: "twitter", inserted_at: event_time()})
+      record_event!(visitor, "pageview", %{platform: "google", inserted_at: event_time()})
 
       assert Analytics.kpis(@ws, window: window()).pageviews == 2
     end
@@ -64,10 +67,10 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       v1 = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
       v2 = create_visitor!(%{first_seen_at: ~U[2026-05-01 00:00:00.000000Z]})
 
-      record_event!(v1, "pageview", %{path: "/a"})
-      record_event!(v1, "pageview", %{path: "/b"})
-      record_event!(v2, "pageview", %{path: "/c"})
-      record_event!(v2, "sale", %{path: "/buy", amount_cents: 5000})
+      record_event!(v1, "pageview", %{path: "/a", inserted_at: event_time()})
+      record_event!(v1, "pageview", %{path: "/b", inserted_at: event_time()})
+      record_event!(v2, "pageview", %{path: "/c", inserted_at: event_time()})
+      record_event!(v2, "sale", %{path: "/buy", amount_cents: 5000, inserted_at: event_time()})
 
       kpis = Analytics.kpis(@ws, window: window())
 
@@ -81,8 +84,8 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       identified = create_visitor!(%{identified_at: ~U[2026-06-05 00:00:00.000000Z]})
       anon = create_visitor!(%{})
 
-      record_event!(identified, "pageview", %{path: "/a"})
-      record_event!(anon, "pageview", %{path: "/b"})
+      record_event!(identified, "pageview", %{path: "/a", inserted_at: event_time()})
+      record_event!(anon, "pageview", %{path: "/b", inserted_at: event_time()})
 
       kpis = Analytics.kpis(@ws, window: window())
 
@@ -121,9 +124,9 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       identified = create_visitor!(%{identified_at: ~U[2026-06-05 00:00:00.000000Z]})
       anon = create_visitor!(%{})
 
-      record_event!(identified, "pageview", %{path: "/a"})
-      record_event!(identified, "pageview", %{path: "/b"})
-      record_event!(anon, "pageview", %{path: "/c"})
+      record_event!(identified, "pageview", %{path: "/a", inserted_at: event_time()})
+      record_event!(identified, "pageview", %{path: "/b", inserted_at: event_time()})
+      record_event!(anon, "pageview", %{path: "/c", inserted_at: event_time()})
 
       kpis = Analytics.kpis(@ws, window: window())
 

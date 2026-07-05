@@ -11,6 +11,8 @@ defmodule GoodAnalytics.Core.AudienceTest do
     %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
   end
 
+  defp event_time, do: ~U[2026-06-15 12:00:00.000000Z]
+
   # Seeds one pageview for a fresh visitor with the given device columns.
   # Uses a direct Event insert so explicit device_type values are preserved;
   # Recorder.record/3 drops device fields and re-derives them from user_agent.
@@ -172,10 +174,10 @@ defmodule GoodAnalytics.Core.AudienceTest do
       fr = create_visitor!(%{geo: %{"country_code" => "FR", "country" => "France"}})
       unknown = create_visitor!(%{geo: %{}})
 
-      record_event!(us, "pageview", %{path: "/a"})
-      record_event!(us, "pageview", %{path: "/b"})
-      record_event!(fr, "pageview", %{path: "/c"})
-      record_event!(unknown, "pageview", %{path: "/d"})
+      record_event!(us, "pageview", %{path: "/a", inserted_at: event_time()})
+      record_event!(us, "pageview", %{path: "/b", inserted_at: event_time()})
+      record_event!(fr, "pageview", %{path: "/c", inserted_at: event_time()})
+      record_event!(unknown, "pageview", %{path: "/d", inserted_at: event_time()})
 
       rows = Audience.breakdown(@ws, :country, window: window(), metrics: [:events, :users])
 
