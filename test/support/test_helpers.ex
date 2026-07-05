@@ -3,9 +3,12 @@ defmodule GoodAnalytics.TestHelpers do
   Shared factory and helper functions for GoodAnalytics tests.
   """
 
+  alias GoodAnalytics.Core.Events.Event
   alias GoodAnalytics.Core.Events.Recorder
   alias GoodAnalytics.Core.IdentityResolver
   alias GoodAnalytics.Core.Visitors.Visitor
+
+  import Ecto.Query
 
   @workspace_id GoodAnalytics.default_workspace_id()
 
@@ -69,9 +72,32 @@ defmodule GoodAnalytics.TestHelpers do
   Records an event via Recorder. Raises on error.
   """
   def record_event!(visitor, event_type, attrs \\ %{}) do
+    {inserted_at, attrs} = Map.pop(attrs, :inserted_at)
+
     case Recorder.record(visitor, event_type, attrs) do
-      {:ok, event} -> event
+      {:ok, event} -> maybe_set_inserted_at!(event, inserted_at)
       {:error, reason} -> raise "record_event! failed: #{inspect(reason)}"
     end
+  end
+
+  defp maybe_set_inserted_at!(event, nil), do: event
+
+  defp maybe_set_inserted_at!(event, %DateTime{} = inserted_at) do
+    repo = GoodAnalytics.Repo.repo()
+
+    # Back-date only `inserted_at` (not `updated_at`) so window-filtering queries
+    # see the intended event time. Match `{1, _}` so a zero-row update (wrong
+    # prefix/stale id) fails loudly here instead of surfacing as a confusing
+    # off-window count elsewhere.
+    {1, _} =
+      from(e in Event, where: e.id == ^event.id)
+      |> repo.update_all([set: [inserted_at: inserted_at]], prefix: "good_analytics")
+
+    %{event | inserted_at: inserted_at}
+  end
+
+  defp maybe_set_inserted_at!(_event, other) do
+    raise ArgumentError,
+          "record_event! :inserted_at must be a DateTime, got: #{inspect(other)}"
   end
 end
