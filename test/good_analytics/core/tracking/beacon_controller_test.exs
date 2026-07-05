@@ -6,8 +6,10 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
   alias GoodAnalytics.Core.Sessions
   alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Tracking.BeaconController
+  alias GoodAnalytics.Core.Tracking.Router, as: TrackingRouter
   alias GoodAnalytics.Core.Visitors.Visitor
 
+  import Ecto.Query
   import Plug.Test
 
   defp build_event_conn do
@@ -16,6 +18,61 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
     |> Plug.Conn.put_req_header("user-agent", "BeaconControllerTest/1.0")
     |> Plug.Conn.assign(:ga_source, nil)
     |> Plug.Conn.put_private(:phoenix_format, "json")
+  end
+
+  defp build_event_conn_with_cookie(cookie_value) do
+    build_event_conn()
+    |> put_req_cookie("_ga_anon", cookie_value)
+    |> Plug.Conn.fetch_cookies()
+  end
+
+  defp build_click_conn(cookie_value) do
+    conn =
+      conn(:post, "/ga/t/click")
+      |> Map.put(:host, "test.link")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("user-agent", "BeaconControllerTest/1.0")
+      |> Plug.Conn.assign(:ga_source, nil)
+      |> Plug.Conn.put_private(:phoenix_format, "json")
+
+    if cookie_value do
+      conn
+      |> put_req_cookie("_ga_anon", cookie_value)
+      |> Plug.Conn.fetch_cookies()
+    else
+      conn
+    end
+  end
+
+  defp routed_event_conn(payload, cookie_value) do
+    payload
+    |> routed_conn("/event", cookie_value)
+    |> then(&TrackingRouter.call(&1, TrackingRouter.init([])))
+  end
+
+  defp routed_click_conn(payload, cookie_value) do
+    payload
+    |> routed_conn("/click", cookie_value)
+    |> Map.put(:host, "test.link")
+    |> then(&TrackingRouter.call(&1, TrackingRouter.init([])))
+  end
+
+  defp routed_conn(payload, path, cookie_value) do
+    conn =
+      conn(:post, path, Jason.encode!(payload))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("user-agent", "BeaconControllerTest/1.0")
+
+    if cookie_value, do: put_req_cookie(conn, "_ga_anon", cookie_value), else: conn
+  end
+
+  defp visitor_with_anon_id?(anon_id) do
+    GoodAnalytics.Repo.repo().exists?(
+      from(v in Visitor,
+        where: fragment("? @> ARRAY[?]::text[]", v.anonymous_ids, ^anon_id)
+      ),
+      prefix: "good_analytics"
+    )
   end
 
   defp latest_event do
@@ -251,9 +308,235 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
     end
   end
 
-  describe "anonymous_id validation" do
-    alias GoodAnalytics.Core.Visitors.Visitor
+  describe "anonymous_id cookie fallback" do
+    test "routed pageview resolves anonymous_id from _ga_anon cookie when body omits it" do
+      anon_id = "anon-cookie-only-#{System.unique_integer([:positive])}"
 
+      conn =
+        routed_event_conn(
+          %{
+            "event_type" => "pageview",
+            "url" => "https://example.com/pricing"
+          },
+          anon_id
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert visitor_with_anon_id?(anon_id)
+
+      event = latest_event()
+      assert event.event_type == "pageview"
+      assert event.url == "https://example.com/pricing"
+    end
+
+    test "body anonymous_id takes precedence over _ga_anon cookie" do
+      body_anon = "anon-body-#{System.unique_integer([:positive])}"
+      cookie_anon = "anon-cookie-#{System.unique_integer([:positive])}"
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(cookie_anon),
+          %{
+            "event_type" => "pageview",
+            "anonymous_id" => body_anon,
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert visitor_with_anon_id?(body_anon)
+      refute visitor_with_anon_id?(cookie_anon)
+    end
+
+    test "overlong _ga_anon cookie is ignored without error" do
+      long = String.duplicate("a", 200)
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(long),
+          %{
+            "event_type" => "pageview",
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      refute visitor_with_anon_id?(long)
+    end
+
+    test "invalid body anonymous_id falls back to valid _ga_anon cookie" do
+      cookie_anon = "anon-cookie-fallback-#{System.unique_integer([:positive])}"
+      long = String.duplicate("a", 200)
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(cookie_anon),
+          %{
+            "event_type" => "pageview",
+            "anonymous_id" => long,
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert visitor_with_anon_id?(cookie_anon)
+      refute visitor_with_anon_id?(long)
+    end
+
+    test "empty-string body anonymous_id falls back to valid _ga_anon cookie" do
+      cookie_anon = "anon-empty-body-#{System.unique_integer([:positive])}"
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(cookie_anon),
+          %{
+            "event_type" => "pageview",
+            "anonymous_id" => "",
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert visitor_with_anon_id?(cookie_anon)
+    end
+
+    test "whitespace-only body anonymous_id falls back to valid _ga_anon cookie" do
+      cookie_anon = "anon-ws-body-#{System.unique_integer([:positive])}"
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(cookie_anon),
+          %{
+            "event_type" => "pageview",
+            "anonymous_id" => "   ",
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      assert visitor_with_anon_id?(cookie_anon)
+    end
+
+    test "empty _ga_anon cookie value is treated as absent" do
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(""),
+          %{
+            "event_type" => "pageview",
+            "url" => "https://example.com/pricing"
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+      refute visitor_with_anon_id?("")
+    end
+
+    test "engagement beacon resolves visitor via cookie when body omits anonymous_id" do
+      anon_id = "anon-engagement-cookie-#{System.unique_integer([:positive])}"
+      visitor = create_visitor!(%{anonymous_ids: [anon_id]})
+
+      {:ok, pageview_session} =
+        Sessions.sessionize(
+          %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
+          "pageview",
+          %{path: "/pricing", __ts__: DateTime.utc_now()}
+        )
+
+      conn =
+        BeaconController.event(
+          build_event_conn_with_cookie(anon_id),
+          %{
+            "event_type" => "engagement",
+            "url" => "https://example.com/pricing",
+            "engaged_ms" => 5_000,
+            "scroll_depth" => 50
+          }
+        )
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.event_type == "engagement"
+      # The event has no anonymous_id column; the cookie fallback is proven by the
+      # engagement attaching to the pageview's session, which is only reachable by
+      # resolving the cookie-sourced anonymous_id back to `visitor`.
+      assert event.session_id == pageview_session.id
+    end
+
+    test "click beacon resolves visitor via cookie when body omits anonymous_id" do
+      anon_id = "anon-click-cookie-#{System.unique_integer([:positive])}"
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          key: "cookie_click_#{System.unique_integer([:positive])}"
+        })
+
+      conn =
+        BeaconController.click(
+          build_click_conn(anon_id),
+          %{"key" => link.key, "fingerprint" => "fp_cookie_click"}
+        )
+
+      body = Jason.decode!(conn.resp_body)
+      assert body["status"] == "ok"
+      assert body["visitor_id"]
+
+      visitor =
+        GoodAnalytics.TestRepo.get!(Visitor, body["visitor_id"], prefix: "good_analytics")
+
+      assert anon_id in visitor.anonymous_ids
+    end
+
+    test "click body anonymous_id takes precedence over _ga_anon cookie" do
+      body_anon = "anon-click-body-#{System.unique_integer([:positive])}"
+      cookie_anon = "anon-click-cookie-#{System.unique_integer([:positive])}"
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          key: "click_precedence_#{System.unique_integer([:positive])}"
+        })
+
+      conn =
+        BeaconController.click(
+          build_click_conn(cookie_anon),
+          %{
+            "key" => link.key,
+            "anonymous_id" => body_anon,
+            "fingerprint" => "fp_click_precedence"
+          }
+        )
+
+      body = Jason.decode!(conn.resp_body)
+      assert body["status"] == "ok"
+      assert visitor_with_anon_id?(body_anon)
+      refute visitor_with_anon_id?(cookie_anon)
+    end
+
+    test "routed click resolves anonymous_id from _ga_anon cookie through the router pipeline" do
+      anon_id = "anon-routed-click-#{System.unique_integer([:positive])}"
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          key: "routed_click_#{System.unique_integer([:positive])}"
+        })
+
+      conn =
+        routed_click_conn(
+          %{"key" => link.key, "fingerprint" => "fp_routed_click"},
+          anon_id
+        )
+
+      body = Jason.decode!(conn.resp_body)
+      assert body["status"] == "ok"
+      assert body["visitor_id"]
+      assert visitor_with_anon_id?(anon_id)
+    end
+  end
+
+  describe "anonymous_id validation" do
     test "an over-long anonymous_id is dropped while a normal one is stored" do
       long = String.duplicate("a", 200)
       ok = "anon_" <> Integer.to_string(System.unique_integer([:positive]))
