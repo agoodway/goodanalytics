@@ -6,6 +6,16 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
   (default: 24 hours) and creates dispatch records for any events
   that are missing dispatches for enabled connectors.
 
+  ## Mapping eligibility
+
+  For `custom` events, reconciliation gates on the connector mappings that are
+  enabled *at reconciliation time* (bounded by the lookback window). This is a
+  recovery mechanism: it backfills dispatches for events that are currently
+  mapped but never produced a dispatch. It therefore does not recover events
+  whose mapping was disabled or deleted after the event was recorded, and it may
+  create dispatches for in-window events that predate the mapping — both of which
+  are intentional consequences of using current mappings as the eligibility gate.
+
   ## Usage
 
       PgFlow.start_flow(GoodAnalytics.Flows.ConnectorReconciliation, %{
@@ -16,7 +26,18 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
 
   use PgFlow.Flow
 
-  alias GoodAnalytics.Connectors.{Config, Dispatches, EventId, Settings, Signals}
+  require Logger
+
+  alias GoodAnalytics.Connectors.{
+    Config,
+    Dispatches,
+    EventId,
+    EventMapping,
+    EventMappings,
+    Settings,
+    Signals
+  }
+
   alias GoodAnalytics.TimeWindow
 
   @flow slug: :ga_connector_reconciliation,
@@ -42,12 +63,20 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
             connector_type = connector_mod.connector_type()
             event_types = connector_mod.supported_event_types() |> Enum.map(&to_string/1)
 
+            # Load the enabled mappings once per connector and index by event
+            # name, so eligibility gating and snapshot building never re-query.
+            mappings_by_name =
+              workspace_id
+              |> EventMappings.list_enabled_mappings(connector_type)
+              |> Map.new(fn mapping -> {mapping.event_name, mapping} end)
+
             missing_events =
               Dispatches.find_missing_dispatches(
                 to_string(connector_type),
                 workspace_id,
                 since,
-                event_types
+                event_types,
+                Map.keys(mappings_by_name)
               )
 
             dispatches_attrs =
@@ -65,7 +94,7 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
                   }) == :allow
               end)
               |> Enum.map(fn event ->
-                source_context = event.connector_source_context || %{}
+                source_context = source_context_for_event(event, mappings_by_name)
 
                 %{
                   workspace_id: workspace_id,
@@ -86,10 +115,7 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
                 {count, new_scanned}
 
               attrs ->
-                case Dispatches.create_dispatches(attrs) do
-                  {:ok, _} -> {count + length(attrs), new_scanned}
-                  {:error, _, _, _} -> {count, new_scanned}
-                end
+                {count + insert_dispatches(attrs, workspace_id, connector_type), new_scanned}
             end
           end)
 
@@ -130,4 +156,59 @@ defmodule GoodAnalytics.Flows.ConnectorReconciliation do
   defp reconciliation_window do
     Application.get_env(:good_analytics, :reconciliation_window_hours, 24)
   end
+
+  # Inserts the reconciled dispatches one row at a time, returning how many were
+  # created. Per-row (rather than a single batch transaction) so that a unique
+  # conflict — a concurrent planner/reconciliation run already created that one
+  # dispatch — is isolated and never rolls back its non-conflicting batch-mates.
+  # A unique conflict is idempotent (not an error); any other failure is logged
+  # so a real DB/config bug is not silently reported as "created zero".
+  defp insert_dispatches(attrs, workspace_id, connector_type) do
+    Enum.reduce(attrs, 0, fn dispatch_attrs, created ->
+      created + insert_dispatch(dispatch_attrs, workspace_id, connector_type)
+    end)
+  end
+
+  defp insert_dispatch(dispatch_attrs, workspace_id, connector_type) do
+    case Dispatches.create_dispatch(dispatch_attrs) do
+      {:ok, _} ->
+        1
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        log_unless_conflict(changeset, workspace_id, connector_type)
+        0
+    end
+  end
+
+  defp log_unless_conflict(changeset, workspace_id, connector_type) do
+    unless unique_constraint_error?(changeset) do
+      Logger.error(
+        "GoodAnalytics: connector reconciliation insert failed for workspace " <>
+          "#{workspace_id} connector #{connector_type}: #{inspect(changeset.errors)}"
+      )
+    end
+
+    :ok
+  end
+
+  defp unique_constraint_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} ->
+      Keyword.get(opts, :constraint) == :unique
+    end)
+  end
+
+  defp source_context_for_event(%{event_type: "custom"} = event, mappings_by_name) do
+    source_context = event.connector_source_context || %{}
+
+    case Map.get(mappings_by_name, event.event_name) do
+      %EventMapping{} = mapping ->
+        Map.put(source_context, "mapping", EventMapping.to_snapshot(mapping))
+
+      _ ->
+        source_context
+    end
+  end
+
+  defp source_context_for_event(event, _mappings_by_name),
+    do: event.connector_source_context || %{}
 end

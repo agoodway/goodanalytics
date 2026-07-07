@@ -62,6 +62,22 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
       assert event["event_name"] == "Purchase"
     end
 
+    test "builds custom payload with mapped connector event name" do
+      dispatch =
+        custom_dispatch(:meta, %{"connector_event_name" => "StartTrial", "config" => %{}})
+
+      {:ok, payload} = Meta.build_payload(dispatch, %{"pixel_id" => "px"})
+      [event] = payload["data"]
+      assert event["event_name"] == "StartTrial"
+    end
+
+    test "returns an error when a custom Meta mapping has no connector event name" do
+      dispatch = custom_dispatch(:meta, %{"connector_event_name" => nil, "config" => %{}})
+
+      assert {:error, :missing_event_mapping} =
+               Meta.build_payload(dispatch, %{"pixel_id" => "px"})
+    end
+
     test "classifies errors correctly" do
       assert Meta.classify_error(%{status: 429}) == :rate_limited
       assert Meta.classify_error(%{status: 401}) == :credential
@@ -106,6 +122,25 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
       assert conversion["conversionValue"] == 49.0
     end
 
+    test "builds custom payload with mapped conversion action" do
+      dispatch =
+        custom_dispatch(:google, %{
+          "connector_event_name" => nil,
+          "config" => %{"conversion_action_id" => "mapped123"}
+        })
+
+      {:ok, payload} = Google.build_payload(dispatch, %{"customer_id" => "cust123"})
+      [conversion] = payload["conversions"]
+      assert String.contains?(conversion["conversionAction"], "mapped123")
+    end
+
+    test "returns an error when custom Google mapping config is missing" do
+      dispatch = custom_dispatch(:google, %{"connector_event_name" => nil, "config" => %{}})
+
+      assert {:error, :missing_conversion_action_id} =
+               Google.build_payload(dispatch, %{"customer_id" => "cust123"})
+    end
+
     test "classifies errors correctly" do
       assert Google.classify_error(%{status: 429}) == :rate_limited
       assert Google.classify_error(%{status: 401}) == :credential
@@ -137,6 +172,24 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
       assert String.contains?(element["conversion"], "rule789")
       [user_id] = element["user"]["userIds"]
       assert user_id["idValue"] == "li_uuid_1"
+    end
+
+    test "builds custom payload with mapped conversion rule" do
+      dispatch =
+        custom_dispatch(:linkedin, %{
+          "connector_event_name" => nil,
+          "config" => %{"conversion_rule_id" => "mapped-rule"}
+        })
+
+      {:ok, payload} = LinkedIn.build_payload(dispatch, %{})
+      [element] = payload["elements"]
+      assert String.contains?(element["conversion"], "mapped-rule")
+    end
+
+    test "returns an error when custom LinkedIn mapping config is missing" do
+      dispatch = custom_dispatch(:linkedin, %{"connector_event_name" => nil, "config" => %{}})
+
+      assert {:error, :missing_conversion_rule_id} = LinkedIn.build_payload(dispatch, %{})
     end
 
     test "classifies errors correctly" do
@@ -176,11 +229,51 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
       assert event["properties"]["value"] == 49.0
     end
 
+    test "builds custom payload with mapped connector event name" do
+      dispatch =
+        custom_dispatch(:tiktok, %{
+          "connector_event_name" => "CompleteRegistration",
+          "config" => %{}
+        })
+
+      {:ok, payload} = TikTok.build_payload(dispatch, %{"pixel_code" => "px"})
+      [event] = payload["data"]
+      assert event["event"] == "CompleteRegistration"
+    end
+
+    test "returns an error when a custom TikTok mapping has no connector event name" do
+      dispatch = custom_dispatch(:tiktok, %{"connector_event_name" => nil, "config" => %{}})
+
+      assert {:error, :missing_event_mapping} =
+               TikTok.build_payload(dispatch, %{"pixel_code" => "px"})
+    end
+
     test "classifies errors correctly" do
       assert TikTok.classify_error(%{status: 429}) == :rate_limited
       assert TikTok.classify_error(%{status: 401}) == :credential
       assert TikTok.classify_error(%{status: 400}) == :permanent
       assert TikTok.classify_error(%{status: 500}) == :transient
     end
+  end
+
+  defp custom_dispatch(connector_type, mapping) do
+    %{
+      @dispatch
+      | connector_event_id: "#{connector_type}_custom_abc123",
+        source_context:
+          Map.merge(@dispatch.source_context, %{
+            "event_type" => "custom",
+            "event_name" => "trial_started",
+            "mapping" =>
+              Map.merge(
+                %{
+                  "id" => "mapping-1",
+                  "event_type" => "custom",
+                  "event_name" => "trial_started"
+                },
+                mapping
+              )
+          })
+    }
   end
 end

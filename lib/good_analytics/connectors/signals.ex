@@ -85,6 +85,8 @@ defmodule GoodAnalytics.Connectors.Signals do
     visitor_id = Keyword.get(opts, :visitor_id)
     source = Keyword.get(opts, :source, %{})
     event_type = Keyword.get(opts, :event_type)
+    event_name = Keyword.get(opts, :event_name)
+    url = Keyword.get(opts, :url)
     amount_cents = Keyword.get(opts, :amount_cents)
     currency = Keyword.get(opts, :currency)
 
@@ -93,6 +95,8 @@ defmodule GoodAnalytics.Connectors.Signals do
       "visitor_id" => visitor_id,
       "source" => source,
       "event_type" => event_type,
+      "event_name" => event_name,
+      "url" => url,
       "amount_cents" => amount_cents,
       "currency" => currency,
       "captured_at" => DateTime.utc_now() |> DateTime.to_iso8601()

@@ -60,12 +60,42 @@ defmodule GoodAnalytics.Connectors.PostCommitTest do
     assert input["inserted_at"] == DateTime.to_iso8601(event.inserted_at)
   end
 
+  test "includes custom event names in durable planning input" do
+    Application.put_env(:good_analytics, :repo, TxRepo)
+    Application.put_env(:good_analytics, :connector_post_commit_flow_runner, TestFlowRunner)
+
+    event = %{
+      id: "11111111-1111-1111-1111-111111111111",
+      workspace_id: "00000000-0000-0000-0000-000000000000",
+      visitor_id: "22222222-2222-2222-2222-222222222222",
+      event_type: "custom",
+      event_name: "trial_started",
+      inserted_at: ~U[2026-04-21 12:00:00.000000Z],
+      connector_source_context: %{
+        "event_type" => "custom",
+        "event_name" => "trial_started",
+        "signals" => %{"_fbp" => "fb.1.123"}
+      }
+    }
+
+    assert :ok == PostCommit.maybe_dispatch(event, %{connector_signals: %{"_fbp" => "fb.1.123"}})
+
+    assert_receive {:start_flow, GoodAnalytics.Flows.ConnectorPlanning, input}
+    assert input["event_type"] == "custom"
+    assert input["event_name"] == "trial_started"
+    assert input["source_context"]["event_name"] == "trial_started"
+  end
+
   test "skips the durable runner for ineligible events" do
     Application.put_env(:good_analytics, :repo, NoTxRepo)
     Application.put_env(:good_analytics, :connector_post_commit_flow_runner, TestFlowRunner)
 
     assert :ok == PostCommit.maybe_dispatch(%{event_type: "pageview"})
     refute_receive {:start_flow, _, _}
+  end
+
+  test "custom events are connector eligible" do
+    assert PostCommit.connector_eligible?(%{event_type: "custom"})
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:good_analytics, key)

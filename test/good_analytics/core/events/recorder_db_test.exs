@@ -128,6 +128,21 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
       assert %DateTime{} = event.inserted_at
       assert DateTime.compare(event.inserted_at, before_call) in [:gt, :eq]
     end
+
+    test "custom events preserve connector source context event name and URL" do
+      visitor = create_visitor!()
+
+      assert {:ok, event} =
+               Recorder.record_custom(visitor, "trial_started", %{
+                 url: "https://example.com/signup",
+                 connector_signals: %{"fbclid" => "abc123"}
+               })
+
+      assert event.connector_source_context["event_type"] == "custom"
+      assert event.connector_source_context["event_name"] == "trial_started"
+      assert event.connector_source_context["url"] == "https://example.com/signup"
+      assert event.connector_source_context["signals"] == %{"fbclid" => "abc123"}
+    end
   end
 
   describe "composite primary key (id, inserted_at)" do

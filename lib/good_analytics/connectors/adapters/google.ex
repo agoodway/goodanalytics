@@ -27,10 +27,31 @@ defmodule GoodAnalytics.Connectors.Adapters.Google do
   def build_payload(dispatch, credentials) do
     source_context = dispatch.source_context
     signals = Map.get(source_context, "signals", %{})
+    conversion_action_id = conversion_action_id(source_context, credentials)
 
+    if is_nil(conversion_action_id) do
+      {:error, :missing_conversion_action_id}
+    else
+      build_payload_with_conversion_action(
+        dispatch,
+        source_context,
+        signals,
+        credentials,
+        conversion_action_id
+      )
+    end
+  end
+
+  defp build_payload_with_conversion_action(
+         dispatch,
+         source_context,
+         signals,
+         credentials,
+         conversion_action_id
+       ) do
     conversion = %{
       "conversionAction" =>
-        "customers/#{credentials["customer_id"]}/conversionActions/#{credentials["conversion_action_id"]}",
+        "customers/#{credentials["customer_id"]}/conversionActions/#{conversion_action_id}",
       "conversionDateTime" => format_google_timestamp(source_context),
       "orderId" => dispatch.connector_event_id
     }
@@ -59,6 +80,16 @@ defmodule GoodAnalytics.Connectors.Adapters.Google do
     }
 
     {:ok, payload}
+  end
+
+  defp conversion_action_id(%{"event_type" => "custom"} = source_context, _credentials) do
+    source_context
+    |> get_in(["mapping", "config", "conversion_action_id"])
+    |> HTTPSupport.blank_to_nil()
+  end
+
+  defp conversion_action_id(_source_context, credentials) do
+    credentials["conversion_action_id"] |> HTTPSupport.blank_to_nil()
   end
 
   @impl true

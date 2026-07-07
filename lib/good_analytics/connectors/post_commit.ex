@@ -14,7 +14,7 @@ defmodule GoodAnalytics.Connectors.PostCommit do
 
   require Logger
 
-  @connector_eligible_types ~w(lead sale)
+  @connector_eligible_types ~w(lead sale custom)
 
   @doc """
   Triggers connector dispatch planning for a committed event.
@@ -128,10 +128,17 @@ defmodule GoodAnalytics.Connectors.PostCommit do
       "workspace_id" => event.workspace_id,
       "visitor_id" => event.visitor_id,
       "event_type" => to_string(event.event_type),
+      "event_name" => event_name(event, source_context),
       "inserted_at" => DateTime.to_iso8601(event.inserted_at),
       "connector_signals" => signals,
       "source_context" => source_context
     }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp event_name(event, source_context) do
+    Map.get(event, :event_name) || Map.get(source_context, "event_name")
   end
 
   defp repo_in_transaction?(repo) do
