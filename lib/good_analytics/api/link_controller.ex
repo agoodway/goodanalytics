@@ -1,4 +1,11 @@
 defmodule GoodAnalytics.Api.LinkController do
+  @moduledoc """
+  Workspace-scoped REST endpoints for managing tracked links.
+
+  The controller handles CRUD, aggregate stats, and click event listing for
+  links that belong to the authenticated API key's workspace.
+  """
+
   use Phoenix.Controller, formats: [:json]
 
   alias GoodAnalytics.Api.Schemas
@@ -12,6 +19,7 @@ defmodule GoodAnalytics.Api.LinkController do
 
   # ── OpenApiSpex Operations ──
 
+  @doc false
   def open_api_operation(:create) do
     %Operation{
       tags: ["Links"],
@@ -29,6 +37,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:index) do
     %Operation{
       tags: ["Links"],
@@ -58,6 +67,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:show) do
     %Operation{
       tags: ["Links"],
@@ -71,6 +81,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:update) do
     %Operation{
       tags: ["Links"],
@@ -91,6 +102,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:delete) do
     %Operation{
       tags: ["Links"],
@@ -104,6 +116,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:stats) do
     %Operation{
       tags: ["Links"],
@@ -117,6 +130,7 @@ defmodule GoodAnalytics.Api.LinkController do
     }
   end
 
+  @doc false
   def open_api_operation(:clicks) do
     %Operation{
       tags: ["Links"],
@@ -150,6 +164,7 @@ defmodule GoodAnalytics.Api.LinkController do
 
   # ── Actions ──
 
+  @doc false
   def create(conn, _params) do
     workspace_id = conn.assigns.workspace_id
     attrs = conn.body_params |> to_plain_map() |> Map.put(:workspace_id, workspace_id)
@@ -169,6 +184,7 @@ defmodule GoodAnalytics.Api.LinkController do
     end
   end
 
+  @doc false
   def index(conn, params) do
     workspace_id = conn.assigns.workspace_id
     limit = min(Map.get(params, :limit, 50), @max_limit)
@@ -178,6 +194,7 @@ defmodule GoodAnalytics.Api.LinkController do
     json(conn, Enum.map(links, &serialize_link/1))
   end
 
+  @doc false
   def show(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -187,6 +204,7 @@ defmodule GoodAnalytics.Api.LinkController do
     end
   end
 
+  @doc false
   def update(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -207,6 +225,7 @@ defmodule GoodAnalytics.Api.LinkController do
     end
   end
 
+  @doc false
   def delete(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -216,6 +235,7 @@ defmodule GoodAnalytics.Api.LinkController do
     end
   end
 
+  @doc false
   def stats(conn, %{link_id: link_id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -234,6 +254,7 @@ defmodule GoodAnalytics.Api.LinkController do
     end
   end
 
+  @doc false
   def clicks(conn, %{link_id: link_id} = params) do
     workspace_id = conn.assigns.workspace_id
     limit = min(Map.get(params, :limit, 50), @max_limit)
@@ -257,6 +278,7 @@ defmodule GoodAnalytics.Api.LinkController do
       key: link.key,
       url: link.url,
       link_type: link.link_type,
+      partner_id: link.partner_id,
       utm_source: link.utm_source,
       utm_medium: link.utm_medium,
       utm_campaign: link.utm_campaign,

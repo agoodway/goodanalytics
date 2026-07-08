@@ -18,11 +18,12 @@ defmodule GoodAnalytics.Core.Funnels.Step do
     field(:label, :string)
     field(:combine, Ecto.Enum, values: [:all, :any], default: :all)
 
-    embeds_many :filters, Filter, on_replace: :delete
+    embeds_many(:filters, Filter, on_replace: :delete)
   end
 
   @kinds ~w(event url property source)
 
+  @doc "Builds a changeset for a funnel step and its embedded filters."
   def changeset(step, attrs) do
     step
     |> cast(attrs, [:kind, :label, :combine])

@@ -17,6 +17,7 @@ defmodule GoodAnalytics.Api.Schemas.LinkResponse do
       key: %OpenApiSpex.Schema{type: :string},
       url: %OpenApiSpex.Schema{type: :string},
       link_type: %OpenApiSpex.Schema{type: :string},
+      partner_id: %OpenApiSpex.Schema{type: :string, format: :uuid, nullable: true},
       utm_source: %OpenApiSpex.Schema{type: :string},
       utm_medium: %OpenApiSpex.Schema{type: :string},
       utm_campaign: %OpenApiSpex.Schema{type: :string},

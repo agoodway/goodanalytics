@@ -21,6 +21,12 @@ defmodule GoodAnalytics.Api.Schemas.LinkParams do
         enum: ~w(short referral campaign),
         default: "short"
       },
+      partner_id: %OpenApiSpex.Schema{
+        type: :string,
+        format: :uuid,
+        description: "Partner ID (required when link_type is 'referral')",
+        nullable: true
+      },
       utm_source: %OpenApiSpex.Schema{type: :string},
       utm_medium: %OpenApiSpex.Schema{type: :string},
       utm_campaign: %OpenApiSpex.Schema{type: :string},

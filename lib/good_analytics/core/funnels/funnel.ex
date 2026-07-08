@@ -25,8 +25,8 @@ defmodule GoodAnalytics.Core.Funnels.Funnel do
     field(:conversion_window_days, :integer, default: 7)
     field(:archived_at, :utc_datetime_usec)
 
-    embeds_one :cohort_source_filter, CohortSourceFilter, on_replace: :update
-    embeds_many :steps, Step, on_replace: :delete
+    embeds_one(:cohort_source_filter, CohortSourceFilter, on_replace: :update)
+    embeds_many(:steps, Step, on_replace: :delete)
 
     timestamps()
   end
@@ -80,5 +80,4 @@ defmodule GoodAnalytics.Core.Funnels.Funnel do
       end
     end)
   end
-
 end

@@ -26,9 +26,18 @@ defmodule GoodAnalytics.Connectors.Adapters.LinkedIn do
   def build_payload(dispatch, credentials) do
     source_context = dispatch.source_context
     signals = Map.get(source_context, "signals", %{})
+    conversion_rule_id = conversion_rule_id(source_context, credentials)
 
+    if is_nil(conversion_rule_id) do
+      {:error, :missing_conversion_rule_id}
+    else
+      build_payload_with_conversion_rule(dispatch, source_context, signals, conversion_rule_id)
+    end
+  end
+
+  defp build_payload_with_conversion_rule(dispatch, source_context, signals, conversion_rule_id) do
     conversion = %{
-      "conversion" => "urn:lla:llaPartnerConversion:#{credentials["conversion_rule_id"]}",
+      "conversion" => "urn:lla:llaPartnerConversion:#{conversion_rule_id}",
       "conversionHappenedAt" => unix_ms_timestamp(source_context),
       "eventId" => dispatch.connector_event_id,
       "user" => %{
@@ -58,6 +67,16 @@ defmodule GoodAnalytics.Connectors.Adapters.LinkedIn do
     }
 
     {:ok, payload}
+  end
+
+  defp conversion_rule_id(%{"event_type" => "custom"} = source_context, _credentials) do
+    source_context
+    |> get_in(["mapping", "config", "conversion_rule_id"])
+    |> HTTPSupport.blank_to_nil()
+  end
+
+  defp conversion_rule_id(_source_context, credentials) do
+    credentials["conversion_rule_id"] |> HTTPSupport.blank_to_nil()
   end
 
   @impl true

@@ -1,6 +1,7 @@
 defmodule GoodAnalytics.Core.FunnelsDBTest do
   use GoodAnalytics.DataCase, async: false
 
+  alias GoodAnalytics.Core.Events.Recorder
   alias GoodAnalytics.Core.Funnels
   alias GoodAnalytics.Core.Funnels.Funnel
 
@@ -154,12 +155,12 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
       visitor = create_visitor!()
 
       {:ok, _event} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor, "pageview", %{
+        Recorder.record(visitor, "pageview", %{
           url: "https://acme.com/pricing?utm=x"
         })
 
       {:ok, _event} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor, "sale", %{})
+        Recorder.record(visitor, "sale", %{})
 
       funnel =
         create_funnel!(%{
@@ -194,20 +195,20 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
       visitor2 = create_visitor!()
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor1, "pageview", %{
+        Recorder.record(visitor1, "pageview", %{
           url: "https://acme.com/pricing"
         })
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor1, "sale", %{})
+        Recorder.record(visitor1, "sale", %{})
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor2, "pageview", %{
+        Recorder.record(visitor2, "pageview", %{
           url: "https://acme.com/plans"
         })
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor2, "sale", %{})
+        Recorder.record(visitor2, "sale", %{})
 
       funnel =
         create_funnel!(%{
@@ -251,21 +252,21 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
       # visitor_both hits /pricing AND has a sale event
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor_both, "pageview", %{
+        Recorder.record(visitor_both, "pageview", %{
           url: "https://acme.com/pricing"
         })
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor_both, "sale", %{})
+        Recorder.record(visitor_both, "sale", %{})
 
       # visitor_one hits /about (does NOT match /pricing)
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor_one, "pageview", %{
+        Recorder.record(visitor_one, "pageview", %{
           url: "https://acme.com/about"
         })
 
       {:ok, _} =
-        GoodAnalytics.Core.Events.Recorder.record(visitor_one, "sale", %{})
+        Recorder.record(visitor_one, "sale", %{})
 
       funnel =
         create_funnel!(%{

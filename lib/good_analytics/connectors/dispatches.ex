@@ -142,6 +142,19 @@ defmodule GoodAnalytics.Connectors.Dispatches do
   for the given connector type. Used by the reconciliation flow.
   """
   def find_missing_dispatches(connector_type, workspace_id, since, event_types) do
+    find_missing_dispatches(connector_type, workspace_id, since, event_types, [])
+  end
+
+  @doc """
+  Finds connector-eligible built-in events and mapped custom events missing dispatches.
+  """
+  def find_missing_dispatches(
+        connector_type,
+        workspace_id,
+        since,
+        event_types,
+        mapped_event_names
+      ) do
     repo = Repo.repo()
 
     from(e in {"ga_events", Event},
@@ -151,7 +164,9 @@ defmodule GoodAnalytics.Connectors.Dispatches do
           d.event_inserted_at == e.inserted_at and
           d.connector_type == ^connector_type,
       where: e.workspace_id == ^workspace_id,
-      where: e.event_type in ^event_types,
+      where:
+        e.event_type in ^event_types or
+          (e.event_type == "custom" and e.event_name in ^mapped_event_names),
       where: e.inserted_at >= ^since,
       where: is_nil(d.id),
       select: e

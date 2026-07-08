@@ -70,7 +70,8 @@ defmodule GoodAnalytics.MixProject do
       {:jason, "~> 1.4"},
 
       # Caching
-      {:nebulex, "~> 2.6"},
+      {:nebulex, "~> 3.0"},
+      {:nebulex_local, "~> 3.0"},
       {:decorator, "~> 1.4"},
 
       # UUID

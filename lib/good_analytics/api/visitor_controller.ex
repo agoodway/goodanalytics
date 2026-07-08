@@ -1,4 +1,11 @@
 defmodule GoodAnalytics.Api.VisitorController do
+  @moduledoc """
+  Workspace-scoped REST endpoints for visitor lookup and inspection.
+
+  The controller exposes visitor listing, direct lookup, timeline, and
+  attribution reads for the authenticated API key's workspace.
+  """
+
   use Phoenix.Controller, formats: [:json]
 
   alias GoodAnalytics.Api.Schemas
@@ -12,6 +19,7 @@ defmodule GoodAnalytics.Api.VisitorController do
 
   # ── OpenApiSpex Operations ──
 
+  @doc false
   def open_api_operation(:index) do
     %Operation{
       tags: ["Visitors"],
@@ -41,6 +49,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     }
   end
 
+  @doc false
   def open_api_operation(:show) do
     %Operation{
       tags: ["Visitors"],
@@ -54,6 +63,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     }
   end
 
+  @doc false
   def open_api_operation(:lookup) do
     %Operation{
       tags: ["Visitors"],
@@ -69,6 +79,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     }
   end
 
+  @doc false
   def open_api_operation(:timeline) do
     %Operation{
       tags: ["Visitors"],
@@ -86,6 +97,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     }
   end
 
+  @doc false
   def open_api_operation(:attribution) do
     %Operation{
       tags: ["Visitors"],
@@ -102,6 +114,7 @@ defmodule GoodAnalytics.Api.VisitorController do
 
   # ── Actions ──
 
+  @doc false
   def index(conn, params) do
     workspace_id = conn.assigns.workspace_id
     limit = min(Map.get(params, :limit, 20), @max_limit)
@@ -111,6 +124,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     json(conn, Enum.map(visitors, &serialize_visitor/1))
   end
 
+  @doc false
   def show(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -120,6 +134,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     end
   end
 
+  @doc false
   def lookup(conn, %{external_id: external_id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -129,6 +144,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     end
   end
 
+  @doc false
   def timeline(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 
@@ -142,6 +158,7 @@ defmodule GoodAnalytics.Api.VisitorController do
     end
   end
 
+  @doc false
   def attribution(conn, %{id: id}) do
     workspace_id = conn.assigns.workspace_id
 

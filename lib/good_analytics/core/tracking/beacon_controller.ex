@@ -1,6 +1,17 @@
 defmodule GoodAnalytics.Core.Tracking.BeaconController do
   @moduledoc """
   Handles beacon POSTs from the JS client and client-side click tracking.
+
+  ## Anonymous identity (`_ga_anon`)
+
+  When a request body omits `anonymous_id`, the controller falls back to the
+  `_ga_anon` cookie (see `resolve_anonymous_id/2`). Treat this cookie as a
+  **weak, client-forgeable identity signal**: it is set server-side with
+  `http_only: true` + `same_site: "Lax"` (mitigating XSS theft and CSRF) and
+  carries a 128-bit random id (infeasible to guess), but it is unsigned, so a
+  client with direct cookie access can still present an arbitrary value. It is
+  only ever used as a weak signal for visitor resolution/merging alongside a
+  fingerprint — never as authorization or for any privileged decision.
   """
 
   # NOTE: Rate limiting is expected at the infrastructure level (nginx, CloudFlare, etc.).
@@ -11,9 +22,21 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   require Logger
 
   alias GoodAnalytics.Connectors.Signals
-  alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links}
+  alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links, Partners}
+  alias GoodAnalytics.Core.Partners.Attribution
+  alias GoodAnalytics.Core.Tracking.ReferralCookie
+  alias GoodAnalytics.Core.Tracking.SourceClassifier
+  alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Geo
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+  @max_url_length 2083
+  @max_fingerprint_length 128
+  @max_event_name_length 100
+  @max_anonymous_id_length 128
+  @anon_cookie "_ga_anon"
+  @max_engaged_ms 30 * 60 * 1000
+  # Maximum number of event properties preserved after sanitization.
+  @max_properties 50
 
   @doc """
   Receives beacon events from the JS snippet.
@@ -34,13 +57,25 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   """
   def event(conn, params) do
     workspace_id = workspace_id(conn, params)
+    source = ga_source(conn, params)
+    event_type = Map.get(params, "event_type", "pageview")
 
-    signals = %{
-      ga_id: Map.get(params, "ga_id"),
-      fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-      anonymous_id: Map.get(params, "anonymous_id"),
-      source: conn.assigns[:ga_source]
-    }
+    cond do
+      event_type not in Event.ingest_types() ->
+        conn
+        |> put_status(422)
+        |> json(%{status: "error", message: "invalid event_type"})
+
+      event_type == "engagement" ->
+        handle_engagement_event(conn, params, workspace_id, source)
+
+      true ->
+        handle_standard_event(conn, params, workspace_id, source, event_type)
+    end
+  end
+
+  defp handle_standard_event(conn, params, workspace_id, source, event_type) do
+    signals = tracking_signals(conn, params, source)
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
       {:ok, visitor} ->
@@ -52,28 +87,24 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
             validate_fingerprint(Map.get(params, "fingerprint"))
           )
 
-        event_type = Map.get(params, "event_type", "pageview")
+        if reconcile_only? do
+          json(conn, %{status: "ok"})
+        else
+          # Extract connector signals from JS payload and merge with server signals
+          js_signals = Signals.extract_from_payload(params)
 
-        cond do
-          event_type not in Event.ingest_types() ->
-            conn
-            |> put_status(422)
-            |> json(%{status: "error", message: "invalid event_type"})
+          server_signals = connector_signals(conn.assigns[:ga_signals])
+          connector_signals = Signals.merge([server_signals, js_signals])
 
-          reconcile_only? ->
-            json(conn, %{status: "ok"})
+          # Derive referral context from payload token or visitor state
+          referral_attrs = derive_referral_context(visitor, params)
 
-          true ->
-            # Extract connector signals from JS payload and merge with server signals
-            js_signals = Signals.extract_from_payload(params)
-
-            server_signals = connector_signals(conn.assigns[:ga_signals])
-            connector_signals = Signals.merge([server_signals, js_signals])
-
-            event_attrs = %{
+          event_attrs =
+            %{
               url: sanitize_url(Map.get(params, "url")),
               referrer: sanitize_url(Map.get(params, "referrer")),
-              source: conn.assigns[:ga_source],
+              event_name: validate_event_name(Map.get(params, "event_name")),
+              source: source,
               properties: sanitize_properties(Map.get(params, "properties", %{})),
               event_id: validate_event_id(Map.get(params, "event_id")),
               fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
@@ -81,14 +112,40 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
               user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
               connector_signals: connector_signals
             }
+            |> Map.merge(referral_attrs)
 
-            Recorder.record(visitor, event_type, event_attrs)
-            Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
-            json(conn, %{status: "ok"})
+          Recorder.record(visitor, event_type, event_attrs)
+          Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
+          json(conn, %{status: "ok"})
         end
 
       {:error, reason} ->
         Logger.warning("GoodAnalytics: identity resolution failed in beacon: #{inspect(reason)}")
+        json(conn, %{status: "ok"})
+    end
+  end
+
+  defp handle_engagement_event(conn, params, workspace_id, source) do
+    conn
+    |> tracking_signals(params, source)
+    |> IdentityResolver.find_candidates(workspace_id)
+    |> case do
+      [] ->
+        json(conn, %{status: "ok"})
+
+      [_first, _second | _rest] ->
+        json(conn, %{status: "ok"})
+
+      [visitor] ->
+        event_attrs = %{
+          url: sanitize_url(Map.get(params, "url")),
+          properties: sanitize_properties(Map.get(params, "properties", %{})),
+          anonymous_id: resolve_anonymous_id(conn, params),
+          engaged_ms: validate_engaged_ms(Map.get(params, "engaged_ms")),
+          scroll_depth: validate_scroll_depth(Map.get(params, "scroll_depth"))
+        }
+
+        _ = Recorder.record(visitor, "engagement", event_attrs)
         json(conn, %{status: "ok"})
     end
   end
@@ -138,45 +195,125 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         link.workspace_id ||
         GoodAnalytics.default_workspace_id()
 
+    # Validate referral partner if this is a referral link
+    referral_context = build_referral_context(link, click_id)
+    source = ga_source(conn, params)
+
     signals = %{
       click_id: click_id,
       fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
-      anonymous_id: Map.get(params, "anonymous_id"),
-      source: conn.assigns[:ga_source]
+      anonymous_id: resolve_anonymous_id(conn, params),
+      source: source
     }
 
     case IdentityResolver.resolve(signals, workspace_id: workspace_id) do
       {:ok, visitor} ->
-        record_result =
-          Recorder.record_click(visitor, link, %{
+        # Update visitor partner attribution for referral clicks
+        if referral_context do
+          Attribution.set_partner_attribution(visitor.id, referral_context)
+        end
+
+        click_attrs =
+          %{
             click_id: click_id,
-            source: conn.assigns[:ga_source],
+            source: source,
             ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
             user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
             url: sanitize_url(Map.get(params, "url")),
             referrer: sanitize_url(Map.get(params, "referrer"))
-          })
+          }
+          |> Attribution.merge_into_attrs(referral_context)
 
-        case record_result do
-          {:ok, _event} ->
-            Links.increment_clicks(link.id, true)
-
-          {:error, _changeset} ->
-            :ok
+        case Recorder.record_click(visitor, link, click_attrs) do
+          {:ok, _event} -> Links.increment_clicks(link.id, true)
+          {:error, _changeset} -> :ok
         end
 
         Geo.enqueue_enrichment(visitor.id, conn.remote_ip)
 
-        json(conn, %{
-          status: "ok",
-          ga_id: click_id,
-          visitor_id: visitor.id
-        })
+        response = %{status: "ok", ga_id: click_id, visitor_id: visitor.id}
+
+        conn
+        |> Attribution.maybe_set_cookie(referral_context)
+        |> json(response)
 
       {:error, _reason} ->
         json(conn, %{status: "ok", ga_id: click_id})
     end
   end
+
+  defp derive_referral_context(%Visitor{} = visitor, params) do
+    # Priority: payload token > visitor last_partner attribution
+    case verify_payload_ref_token(params) do
+      {:ok, context} ->
+        Map.take(context, [:partner_id, :referral_link_id, :referral_click_id])
+
+      {:error, _} ->
+        if visitor.last_partner_id do
+          %{
+            partner_id: visitor.last_partner_id,
+            referral_link_id: visitor.last_referral_link_id,
+            referral_click_id: visitor.last_referral_click_id
+          }
+        else
+          %{}
+        end
+    end
+  end
+
+  defp verify_payload_ref_token(%{"_ga_ref" => token}) when is_binary(token) do
+    ReferralCookie.verify(token)
+  end
+
+  defp verify_payload_ref_token(_), do: {:error, :not_present}
+
+  # Use an upstream-assigned source (e.g. Pro's Ingest.Filter) when present.
+  # Otherwise classify from the JS payload — the url and document.referrer the
+  # SDK reports — never the HTTP request envelope. A beacon is a fetch FROM the
+  # page, so the request Referer header is always the current page (a self-
+  # referral) and the request query string is empty; the real signals live in
+  # the body. Reading the body keeps classification correct across any host
+  # (Astro, PHP, core-direct) and any CDN/edge rewrite that re-originates the
+  # request. A missing url/referrer degrades to :direct rather than self-referring.
+  defp ga_source(conn, params) do
+    conn.assigns[:ga_source] || SourceClassifier.classify(beacon_signal(params))
+  end
+
+  defp beacon_signal(params) do
+    %{
+      query_params: url_query_params(Map.get(params, "url")),
+      referer: Map.get(params, "referrer")
+    }
+  end
+
+  defp url_query_params(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{query: query} when is_binary(query) -> URI.decode_query(query)
+      _uri -> %{}
+    end
+  rescue
+    URI.Error -> %{}
+  end
+
+  defp url_query_params(_url), do: %{}
+
+  defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
+       when is_binary(pid) do
+    case Partners.get_active_partner(link.workspace_id, pid) do
+      nil ->
+        nil
+
+      _partner ->
+        %{
+          partner_id: pid,
+          referral_link_id: link.id,
+          referral_click_id: click_id,
+          workspace_id: link.workspace_id
+        }
+    end
+  end
+
+  defp build_referral_context(_link, _click_id), do: nil
 
   defp workspace_id(conn, params) do
     conn.private[:workspace_id] ||
@@ -187,12 +324,37 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   defp click_domain(conn, _params, workspace_id) when is_binary(workspace_id),
     do: request_host(conn)
 
-  defp click_domain(conn, params, _workspace_id), do: Map.get(params, "domain", conn.host)
+  defp click_domain(conn, _params, _workspace_id), do: request_host(conn)
 
   defp connector_signals(%{connector_signals: connector_signals}) when is_map(connector_signals),
     do: connector_signals
 
   defp connector_signals(_signals), do: %{}
+
+  defp tracking_signals(conn, params, source) do
+    %{
+      ga_id: Map.get(params, "ga_id"),
+      fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
+      anonymous_id: resolve_anonymous_id(conn, params),
+      source: source
+    }
+  end
+
+  # Resolves the anonymous id from the request body, falling back to the
+  # `_ga_anon` cookie. A body value that is absent OR present-but-invalid
+  # (blank, whitespace, or over the length cap) is treated the same — it fails
+  # `validate_anonymous_id/1` and yields the cookie value. Both sources are
+  # client-controlled, so no new trust boundary is crossed; see the moduledoc.
+  defp resolve_anonymous_id(conn, params) do
+    body = validate_anonymous_id(Map.get(params, "anonymous_id"))
+    cookie = validate_anonymous_id(cookie_value(conn, @anon_cookie))
+    body || cookie
+  end
+
+  # Direct-controller call sites may pass a conn whose cookies were never
+  # fetched (a `%Plug.Conn.Unfetched{}` struct); treat that as no cookie.
+  defp cookie_value(%Plug.Conn{cookies: %Plug.Conn.Unfetched{}}, _name), do: nil
+  defp cookie_value(%Plug.Conn{cookies: cookies}, name), do: Map.get(cookies, name)
 
   defp request_host(%Plug.Conn{host: host, port: port}) when port in [80, 443], do: host
 
@@ -209,11 +371,6 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   defp truthy?(value) when value in [true, "true", 1, "1"], do: true
   defp truthy?(_), do: false
 
-  @max_url_length 2083
-  @max_fingerprint_length 128
-  # Maximum number of event properties preserved after sanitization.
-  @max_properties 50
-
   defp sanitize_url(nil), do: nil
   defp sanitize_url(val) when is_binary(val), do: String.slice(val, 0, @max_url_length)
   defp sanitize_url(_), do: nil
@@ -227,6 +384,20 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   defp valid_fingerprint(fp) when fp != "" and byte_size(fp) <= @max_fingerprint_length, do: fp
   defp valid_fingerprint(_fp), do: nil
 
+  defp validate_event_name(name) when is_binary(name) do
+    trimmed = String.trim(name)
+    if trimmed != "" and byte_size(trimmed) <= @max_event_name_length, do: trimmed, else: nil
+  end
+
+  defp validate_event_name(_), do: nil
+
+  defp validate_anonymous_id(id) when is_binary(id) do
+    trimmed = String.trim(id)
+    if trimmed != "" and byte_size(trimmed) <= @max_anonymous_id_length, do: trimmed, else: nil
+  end
+
+  defp validate_anonymous_id(_), do: nil
+
   defp validate_event_id(nil), do: nil
 
   defp validate_event_id(value) when is_binary(value) do
@@ -234,6 +405,22 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   end
 
   defp validate_event_id(_), do: nil
+
+  defp validate_engaged_ms(value) when is_integer(value) and value >= 0,
+    do: min(value, @max_engaged_ms)
+
+  defp validate_engaged_ms(value) when is_float(value) and value >= 0,
+    do: value |> trunc() |> min(@max_engaged_ms)
+
+  defp validate_engaged_ms(_), do: nil
+
+  defp validate_scroll_depth(value) when is_integer(value) and value >= 0 and value <= 100,
+    do: value
+
+  defp validate_scroll_depth(value) when is_float(value) and value >= 0 and value <= 100,
+    do: trunc(value)
+
+  defp validate_scroll_depth(_), do: nil
 
   defp sanitize_properties(props) when is_map(props) do
     props

@@ -24,6 +24,11 @@ defmodule GoodAnalytics.Api.Router do
     post("/events", GoodAnalytics.Api.EventController, :create)
     post("/events/batch", GoodAnalytics.Api.EventController, :batch)
 
+    # Partners
+    resources("/partners", GoodAnalytics.Api.PartnerController,
+      only: [:create, :index, :show, :update, :delete]
+    )
+
     # Links
     resources "/links", GoodAnalytics.Api.LinkController,
       only: [:create, :index, :show, :update, :delete] do
@@ -37,5 +42,10 @@ defmodule GoodAnalytics.Api.Router do
     get("/visitors/:id", GoodAnalytics.Api.VisitorController, :show)
     get("/visitors/:id/timeline", GoodAnalytics.Api.VisitorController, :timeline)
     get("/visitors/:id/attribution", GoodAnalytics.Api.VisitorController, :attribution)
+
+    # Analytics
+    get("/analytics/breakdown", GoodAnalytics.Api.AnalyticsController, :breakdown)
+    get("/analytics/timeseries", GoodAnalytics.Api.AnalyticsController, :timeseries)
+    get("/analytics/summary", GoodAnalytics.Api.AnalyticsController, :summary)
   end
 end

@@ -29,8 +29,10 @@ defmodule GoodAnalytics.Connectors.Config do
   @registered_connectors Application.compile_env(:good_analytics, :connectors, [])
   @dispatch_policy Application.compile_env(:good_analytics, :dispatch_policy, nil)
 
-  @doc "Returns the list of registered connector modules (set at compile time)."
-  def registered_connectors, do: @registered_connectors
+  @doc "Returns the list of registered connector modules."
+  def registered_connectors do
+    Application.get_env(:good_analytics, :connectors, @registered_connectors)
+  end
 
   @doc """
   Returns the list of registered connector types (atoms).
@@ -38,7 +40,7 @@ defmodule GoodAnalytics.Connectors.Config do
   Each module must implement `connector_type/0` from the connector behavior.
   """
   def registered_types do
-    Enum.map(@registered_connectors, & &1.connector_type())
+    Enum.map(registered_connectors(), & &1.connector_type())
   end
 
   @doc """
@@ -47,7 +49,9 @@ defmodule GoodAnalytics.Connectors.Config do
   The callback should be a `{module, function}` tuple that accepts a
   planning context map and returns `:allow` or `{:reject, reason}`.
   """
-  def dispatch_policy, do: @dispatch_policy
+  def dispatch_policy do
+    Application.get_env(:good_analytics, :dispatch_policy, @dispatch_policy)
+  end
 
   @doc """
   Invokes the global dispatch policy callback for a planning context.
@@ -56,7 +60,7 @@ defmodule GoodAnalytics.Connectors.Config do
   Returns `{:reject, reason}` if the policy rejects the dispatch.
   """
   def evaluate_policy(planning_context) do
-    case @dispatch_policy do
+    case dispatch_policy() do
       nil ->
         :allow
 
@@ -78,39 +82,35 @@ defmodule GoodAnalytics.Connectors.Config do
   @doc """
   Looks up a registered connector module by its connector type (atom or string).
 
-  Returns `nil` if not found. Uses a cached lookup map for O(1) access.
+  Returns `nil` if not found. The lookup map is memoized in `:persistent_term`
+  and rebuilt only when the registered-connectors list changes, so the
+  per-delivery hot path stays O(1) without rebuilding the map on every call.
   """
-  def get_connector(connector_type) when is_atom(connector_type) do
-    Map.get(connector_lookup_map(), connector_type)
+  def get_connector(connector_type) do
+    Map.get(connector_lookup(), connector_type)
   end
 
-  def get_connector(connector_type) when is_binary(connector_type) do
-    Map.get(connector_string_lookup_map(), connector_type)
-  end
+  defp connector_lookup do
+    connectors = registered_connectors()
 
-  defp connector_lookup_map do
-    case :persistent_term.get({__MODULE__, :lookup_map}, nil) do
-      nil ->
-        map = Map.new(@registered_connectors, fn mod -> {mod.connector_type(), mod} end)
-        :persistent_term.put({__MODULE__, :lookup_map}, map)
+    case :persistent_term.get({__MODULE__, :connector_lookup}, nil) do
+      {^connectors, map} ->
         map
 
-      map ->
+      _ ->
+        map = build_connector_lookup(connectors)
+        :persistent_term.put({__MODULE__, :connector_lookup}, {connectors, map})
         map
     end
   end
 
-  defp connector_string_lookup_map do
-    case :persistent_term.get({__MODULE__, :string_lookup_map}, nil) do
-      nil ->
-        map =
-          Map.new(@registered_connectors, fn mod -> {to_string(mod.connector_type()), mod} end)
+  defp build_connector_lookup(connectors) do
+    Enum.reduce(connectors, %{}, fn mod, acc ->
+      type = mod.connector_type()
 
-        :persistent_term.put({__MODULE__, :string_lookup_map}, map)
-        map
-
-      map ->
-        map
-    end
+      acc
+      |> Map.put(type, mod)
+      |> Map.put(to_string(type), mod)
+    end)
   end
 end

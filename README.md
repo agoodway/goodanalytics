@@ -98,6 +98,8 @@ mix ecto.migrate
 
 This creates tables for visitors, events, links, link clicks, connectors, and settings — all namespaced under the `good_analytics` PostgreSQL schema.
 
+See [Database Migrations](#database-migrations) for the full host-app workflow, including upgrades after library updates.
+
 ### 3. Download UA Inspector Databases
 
 GoodAnalytics uses [ua_inspector](https://hex.pm/packages/ua_inspector) to parse user-agent strings into device, browser, and OS details. Download the detection databases:
@@ -255,6 +257,130 @@ Disable automatic SPA tracking if your app sends manual pageviews:
 
 Every beacon payload includes a UUIDv4 `event_id` idempotency key that host applications can use for retry deduplication.
 
+## Database Migrations
+
+GoodAnalytics owns its schema. Versioned SQL lives in the library at `priv/good_analytics/sql/versions/` and is applied through [EctoEvolver](https://hex.pm/packages/ecto_evolver). Your host app does not copy or edit that SQL — it adds thin Ecto migrations that delegate to `GoodAnalytics.Migration.up/0` and `GoodAnalytics.Migration.down/0`.
+
+All `ga_*` tables live in a dedicated PostgreSQL schema (default `good_analytics`, configurable via `:schema_prefix`). EctoEvolver tracks which library versions have been applied via a comment on the `ga_version` view, so each migration only runs pending versions.
+
+### Prerequisites
+
+The Mix tasks read your host app's first configured Ecto repo from `:ecto_repos`:
+
+```elixir
+# config/config.exs
+config :my_app, ecto_repos: [MyApp.Repo]
+
+config :good_analytics,
+  repo: MyApp.Repo
+```
+
+Migrations are written to `priv/<repo_underscored>/migrations/` (for `MyApp.Repo`, that is `priv/repo/migrations/`).
+
+### First-time setup
+
+Generate the bootstrap migration:
+
+```bash
+mix good_analytics.setup
+mix ecto.migrate
+```
+
+`mix good_analytics.setup` creates a single `*_setup_good_analytics.exs` file:
+
+```elixir
+defmodule MyApp.Repo.Migrations.SetupGoodAnalytics do
+  use Ecto.Migration
+
+  def up do
+    GoodAnalytics.Migration.up()
+    GoodAnalytics.PartitionManager.ensure_initial_partitions()
+  end
+
+  def down, do: GoodAnalytics.Migration.down()
+end
+```
+
+The setup task is idempotent — re-running it skips generation if a setup migration already exists. If you accidentally have more than one `*_setup_good_analytics.exs` file, delete the extras and re-run `mix ecto.migrate`.
+
+`PartitionManager.ensure_initial_partitions/0` pre-creates the current and upcoming monthly partitions for `ga_events` so ingest works immediately. A background GenServer continues to maintain partitions after boot.
+
+### Upgrading after a library update
+
+When you bump the `good_analytics` dependency and a new EctoEvolver version ships (v05, v06, etc.), generate a new host-app migration:
+
+```bash
+mix good_analytics.gen.migration
+mix ecto.migrate
+```
+
+This creates an `*_update_good_analytics.exs` file that calls the same `up/0` and `down/0` functions. EctoEvolver compares the version comment on `ga_version` against its version list and applies only what is missing — existing databases skip already-applied versions.
+
+You can also create the migration manually:
+
+```elixir
+defmodule MyApp.Repo.Migrations.UpdateGoodAnalytics do
+  use Ecto.Migration
+
+  def up, do: GoodAnalytics.Migration.up()
+  def down, do: GoodAnalytics.Migration.down()
+end
+```
+
+Run it with your normal Ecto workflow (`mix ecto.migrate`, release tasks, CI, etc.). GoodAnalytics schema changes ride alongside your own migrations in `schema_migrations`; only the SQL execution is library-owned.
+
+### Fresh dev environments
+
+A common host-app alias chains your own migrations with the library setup:
+
+```elixir
+# mix.exs
+defp aliases do
+  [
+    "ecto.setup": [
+      "ecto.create",
+      "ecto.migrate",
+      "good_analytics.setup",
+      "ecto.migrate",
+      "run priv/repo/seeds.exs"
+    ]
+  ]
+end
+```
+
+Run your app's migrations first so shared prerequisites exist, then generate and apply the GoodAnalytics migration.
+
+### Custom schema prefix
+
+If you use a non-default schema name, set it before generating or running migrations:
+
+```elixir
+config :good_analytics, schema_prefix: "my_analytics"
+```
+
+EctoEvolver substitutes `$SCHEMA$` in the library SQL files with this value. Query with the matching prefix in application code:
+
+```elixir
+MyApp.Repo.all(Visitor, prefix: "my_analytics")
+```
+
+### Checking the applied version
+
+To see which library schema version is on your database:
+
+```sql
+SELECT obj_description('good_analytics.ga_version'::regclass);
+-- → 'GoodAnalytics version=12'
+```
+
+Replace `good_analytics` with your `:schema_prefix` if customized.
+
+### What not to do
+
+- Do not edit files under `deps/good_analytics/priv/good_analytics/sql/` — changes are lost on the next `mix deps.get`.
+- Do not hand-roll DDL for `ga_*` tables in host-app migrations — add a version in the library instead.
+- Do not generate multiple setup migrations; use `mix good_analytics.gen.migration` for subsequent upgrades.
+
 ## API Reference
 
 ### Identity Resolution
@@ -289,6 +415,78 @@ GoodAnalytics.track_lead(visitor, %{person_external_id: "cust_123"})
 
 # Record a sale
 GoodAnalytics.track_sale(visitor, %{amount_cents: 4900, currency: "USD"})
+```
+
+### Server-Side Tracking In Phoenix Controllers
+
+`GoodAnalytics.track/3` expects a resolved visitor. In Phoenix, resolve the
+visitor from the tracking signals assigned by `GoodAnalytics.Core.Tracking.Plug`,
+then pass that visitor to `track/3`, `track_lead/3`, or `track_sale/3`.
+
+For browser `GET` requests that pass through the tracking plug:
+
+```elixir
+def show(conn, _params) do
+  workspace_id = conn.assigns.workspace_id || GoodAnalytics.default_workspace_id()
+
+  {:ok, visitor} =
+    GoodAnalytics.resolve_visitor(conn.assigns.ga_signals,
+      workspace_id: workspace_id
+    )
+
+  {:ok, _event} =
+    GoodAnalytics.track(visitor, "custom", %{
+      event_name: "Viewed Dashboard",
+      url: Phoenix.Controller.current_url(conn)
+    })
+
+  render(conn, :show)
+end
+```
+
+For `POST` requests or controller actions that may not run the tracking plug,
+build signals from the GoodAnalytics cookies:
+
+```elixir
+def create(conn, params) do
+  conn = Plug.Conn.fetch_cookies(conn)
+  workspace_id = conn.assigns.workspace_id || GoodAnalytics.default_workspace_id()
+
+  signals = %{
+    ga_id: conn.cookies["_ga_good"],
+    anonymous_id: conn.cookies["_ga_anon"],
+    source: conn.assigns[:ga_source]
+  }
+
+  {:ok, visitor} =
+    GoodAnalytics.resolve_visitor(signals, workspace_id: workspace_id)
+
+  {:ok, _event} =
+    GoodAnalytics.track(visitor, "custom", %{
+      event_name: "Submitted Form",
+      properties: params
+    })
+
+  redirect(conn, to: ~p"/thanks")
+end
+```
+
+If the user is authenticated, identify the visitor before recording the event:
+
+```elixir
+{:ok, visitor} =
+  GoodAnalytics.identify(visitor, %{
+    person_external_id: to_string(conn.assigns.current_scope.user.id),
+    person_email: conn.assigns.current_scope.user.email
+  })
+
+GoodAnalytics.track(visitor, "lead", %{url: Phoenix.Controller.current_url(conn)})
+```
+
+The server-side flow is:
+
+```text
+conn/cookies -> signals -> GoodAnalytics.resolve_visitor/2 -> visitor -> GoodAnalytics.track/3
 ```
 
 ### Server-Side Conversions
@@ -568,10 +766,12 @@ end
 
 | Task | Description |
 |------|-------------|
-| `mix good_analytics.setup` | Generate Ecto migration for all GoodAnalytics tables |
-| `mix good_analytics.gen.migration` | Generate a new migration file |
+| `mix good_analytics.setup` | Generate the initial `*_setup_good_analytics.exs` migration (first install only) |
+| `mix good_analytics.gen.migration` | Generate an `*_update_good_analytics.exs` migration for pending library versions |
 | `mix ua_inspector.download` | Download UA detection databases |
 | `mix setup` | Run `deps.get` + `ua_inspector.download` |
+
+See [Database Migrations](#database-migrations) for when to use each task and how they fit into `mix ecto.migrate`.
 
 ## Testing
 

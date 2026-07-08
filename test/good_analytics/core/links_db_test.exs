@@ -140,6 +140,43 @@ defmodule GoodAnalytics.Core.LinksDBTest do
     end
   end
 
+  describe "resolve_live_link_by_key/1" do
+    test "resolves a live link by key alone, ignoring domain" do
+      link = create_link!(%{domain: "alpha.link", key: "uniquekey"})
+
+      assert {:ok, found} = Links.resolve_live_link_by_key("uniquekey")
+      assert found.id == link.id
+      assert found.domain == "alpha.link"
+    end
+
+    test "returns :not_found when no link has the key" do
+      assert {:error, :not_found} = Links.resolve_live_link_by_key("ghost")
+    end
+
+    test "returns :expired when the only matching link is expired" do
+      past = DateTime.add(DateTime.utc_now(:second), -60, :second)
+      create_link!(%{domain: "beta.link", key: "deadkey", expires_at: past})
+
+      assert {:error, :expired} = Links.resolve_live_link_by_key("deadkey")
+    end
+
+    test "resolves the single live link when an expired one shares the key" do
+      past = DateTime.add(DateTime.utc_now(:second), -60, :second)
+      create_link!(%{domain: "old.link", key: "dupkey", expires_at: past})
+      live = create_link!(%{domain: "new.link", key: "dupkey"})
+
+      assert {:ok, found} = Links.resolve_live_link_by_key("dupkey")
+      assert found.id == live.id
+    end
+
+    test "returns :ambiguous when more than one live link shares the key" do
+      create_link!(%{domain: "one.link", key: "ambi"})
+      create_link!(%{domain: "two.link", key: "ambi"})
+
+      assert {:error, :ambiguous} = Links.resolve_live_link_by_key("ambi")
+    end
+  end
+
   describe "list_links/2" do
     test "returns links for workspace ordered by inserted_at DESC" do
       l1 = create_link!()

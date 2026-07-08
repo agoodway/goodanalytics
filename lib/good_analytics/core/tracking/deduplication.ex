@@ -18,9 +18,9 @@ defmodule GoodAnalytics.Core.Tracking.Deduplication do
     ip = get_client_ip(conn)
     cache_key = {:click_dedup, ip, link.id}
 
-    case @cache.get(cache_key) do
+    case @cache.get!(cache_key) do
       nil ->
-        @cache.put(cache_key, true, ttl: @ttl)
+        @cache.put!(cache_key, true, ttl: @ttl)
         {:ok, true}
 
       _exists ->

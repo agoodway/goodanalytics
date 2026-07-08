@@ -34,6 +34,7 @@ defmodule GoodAnalytics.Core.Events.Event do
 
     field(:workspace_id, Ecto.UUID)
     field(:visitor_id, Ecto.UUID)
+    field(:session_id, Ecto.UUID)
 
     # Event classification
     field(:event_type, :string)
@@ -42,6 +43,11 @@ defmodule GoodAnalytics.Core.Events.Event do
     # Link context
     field(:link_id, Ecto.UUID)
     field(:click_id, Ecto.UUID)
+
+    # Partner attribution snapshot (immutable after insert)
+    field(:partner_id, Ecto.UUID)
+    field(:referral_link_id, Ecto.UUID)
+    field(:referral_click_id, Ecto.UUID)
 
     # Page context
     field(:url, :string)
@@ -60,6 +66,16 @@ defmodule GoodAnalytics.Core.Events.Event do
     field(:fingerprint, :string)
     field(:ip_address, EctoNetwork.INET)
     field(:user_agent, :string)
+
+    # Device context (event-grain, parsed from user_agent at ingest)
+    field(:device_type, :string)
+    field(:browser, :string)
+    field(:os, :string)
+    field(:browser_version, :string)
+    field(:os_version, :string)
+    field(:device_brand, :string)
+    field(:device_model, :string)
+    field(:bot_name, :string)
 
     # Promoted properties
     field(:amount_cents, :integer)
@@ -80,8 +96,12 @@ defmodule GoodAnalytics.Core.Events.Event do
   @required_fields [:workspace_id, :visitor_id, :event_type]
   @optional_fields [
     :event_name,
+    :session_id,
     :link_id,
     :click_id,
+    :partner_id,
+    :referral_link_id,
+    :referral_click_id,
     :url,
     :host,
     :path,
@@ -94,11 +114,25 @@ defmodule GoodAnalytics.Core.Events.Event do
     :fingerprint,
     :ip_address,
     :user_agent,
+    :device_type,
+    :browser,
+    :os,
+    :browser_version,
+    :os_version,
+    :device_brand,
+    :device_model,
+    :bot_name,
     :amount_cents,
     :currency,
     :properties,
     :connector_source_context
   ]
+
+  # Cap on free-form source-classification strings. They derive from
+  # client-controlled `utm_*` params with no upstream length bound, so we
+  # truncate (never reject — ingest events are append-only and must not be
+  # dropped) to keep the columns and breakdown outputs from being bloated.
+  @max_source_field_length 255
 
   @doc """
   Changeset for recording an event.
@@ -110,5 +144,24 @@ defmodule GoodAnalytics.Core.Events.Event do
     |> validate_inclusion(:event_type, @event_types)
     |> validate_length(:host, max: 2083)
     |> validate_length(:path, max: 2083)
+    |> truncate_source_fields()
   end
+
+  defp truncate_source_fields(changeset) do
+    changeset
+    |> update_change(:source_platform, &truncate_source_value/1)
+    |> update_change(:source_medium, &truncate_source_value/1)
+    |> update_change(:source_campaign, &truncate_source_value/1)
+    |> update_change(:source, &truncate_source_map/1)
+  end
+
+  defp truncate_source_value(value) when is_binary(value),
+    do: String.slice(value, 0, @max_source_field_length)
+
+  defp truncate_source_value(value), do: value
+
+  defp truncate_source_map(%{} = source),
+    do: Map.new(source, fn {key, value} -> {key, truncate_source_value(value)} end)
+
+  defp truncate_source_map(source), do: source
 end

@@ -44,6 +44,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
   @url_match_modes ~w(equals starts_with regex in)
   @property_ops ~w(eq in)
 
+  @doc "Builds a changeset for a funnel step filter."
   def changeset(filter, attrs) do
     filter
     |> cast(attrs, [
@@ -128,7 +129,11 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
     value = get_field(changeset, :value)
 
     if is_binary(value) and value != "" do
-      add_error(changeset, :value, "value and values are mutually exclusive for url 'in' match mode")
+      add_error(
+        changeset,
+        :value,
+        "value and values are mutually exclusive for url 'in' match mode"
+      )
     else
       changeset
     end
@@ -146,13 +151,17 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
           add_error(changeset, :value, "regex pattern must be 200 characters or fewer")
 
         true ->
-          case :re.compile(value) do
-            {:ok, _} -> changeset
-            {:error, _} -> add_error(changeset, :value, "invalid regex pattern")
-          end
+          validate_regex_compiles(changeset, value)
       end
     else
       changeset
+    end
+  end
+
+  defp validate_regex_compiles(changeset, value) do
+    case :re.compile(value) do
+      {:ok, _} -> changeset
+      {:error, _} -> add_error(changeset, :value, "invalid regex pattern")
     end
   end
 
@@ -174,7 +183,7 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
         changeset
         |> validate_change(:values, fn :values, values ->
           cond do
-            not is_list(values) or length(values) == 0 ->
+            not is_list(values) or values == [] ->
               [values: "must be a non-empty list for 'in' operator"]
 
             length(values) > 100 ->
@@ -199,7 +208,11 @@ defmodule GoodAnalytics.Core.Funnels.Filter do
     campaign = get_field(changeset, :campaign)
 
     if is_nil(platform) and is_nil(medium) and is_nil(campaign) do
-      add_error(changeset, :type, "source filter must specify at least one of platform, medium, or campaign")
+      add_error(
+        changeset,
+        :type,
+        "source filter must specify at least one of platform, medium, or campaign"
+      )
     else
       changeset
     end

@@ -1,7 +1,12 @@
 (function() {
   'use strict';
 
-  if (typeof window.GoodAnalytics !== 'undefined' && window.GoodAnalytics._spaNavigationSetup) {
+  if (
+    typeof window.GoodAnalytics !== 'undefined' &&
+    (window.GoodAnalytics._initialized ||
+      window.GoodAnalytics._spaNavigationSetup ||
+      window.GoodAnalytics._engagementSetup)
+  ) {
     console.warn('GoodAnalytics: detected duplicate snippet load; skipping init');
     return;
   }
@@ -12,12 +17,19 @@
       cookieName: '_ga_good',
       identityStorageKey: '_ga_good_id',
       anonCookieName: '_ga_anon',
+      clientAnonymousId: false,
+      clientAnonCookieName: '_ga_good_anon',
+      anonStorageKey: '_ga_good_anon_id',
+      fingerprintStorageKey: '_ga_good_fp',
+      refCookieName: '_ga_ref',
       cookieDays: 90,
       queryParam: 'ga_id',
       viaParam: 'via',
       refParam: 'ref',
       cleanUrl: true,
       dedupWindow: 30 * 60 * 1000, // 30 minutes
+      engagement: true,
+      engagementThrottleMs: 3000,
       autoSpaNavigation: true,
       workspaceId: null
     },
@@ -34,6 +46,9 @@
      * deduplicate retried beacons before forwarding them to the event recorder.
      */
     init: function(userConfig) {
+      if (this._initialized) return this;
+      this._initialized = true;
+
       if (userConfig) {
         for (var key in userConfig) {
           if (userConfig.hasOwnProperty(key)) {
@@ -69,6 +84,15 @@
         if (modules[i].init) modules[i].init(this);
       }
 
+      // Establish a durable client anonymous id when enabled (static/SaaS deploys
+      // with no server-side _ga_anon cookie). Must run before the first beacon.
+      if (this.config.clientAnonymousId) this._ensureAnonymousId();
+
+      // Hydrate a cached fingerprint synchronously so a returning visitor's first
+      // pageview carries it (the live ThumbmarkJS compute is async and usually
+      // resolves after the pageview beacon). First-ever visits reconcile later.
+      this._hydrateFingerprint();
+
       // Auto-track pageview after init
       if (this.config.autoPageview !== false) {
         this.track('pageview');
@@ -76,7 +100,36 @@
 
       this._setupSpaNavigation();
 
+      if (this.config.engagement !== false) {
+        this._setupEngagement();
+      }
+
+      // A fingerprint may be supplied at init time (e.g. precomputed server-side
+      // or cached). Async sources should call setFingerprint() once ready.
+      if (this.config.fingerprint) {
+        this.setFingerprint(this.config.fingerprint);
+      }
+
       return this;
+    },
+
+    // Supply a browser fingerprint (e.g. from ThumbmarkJS) as a weak identity
+    // signal. Safe to call after init when the fingerprint resolves async; it
+    // reconciles the fingerprint to the current visitor.
+    setFingerprint: function(fp) {
+      if (!fp || this._fingerprint === fp) return;
+      this._fingerprint = fp;
+      // Cache so the next page load can hydrate it synchronously before the pageview.
+      this.setStorage(this.config.fingerprintStorageKey, fp);
+      if (this._onFingerprintReady) this._onFingerprintReady();
+    },
+
+    // Load a previously-cached fingerprint synchronously. Sets `_fingerprint`
+    // directly (does NOT trigger a reconcile) — the value was already known.
+    _hydrateFingerprint: function() {
+      if (this._fingerprint) return;
+      var fp = this.getStorage(this.config.fingerprintStorageKey);
+      if (fp) this._fingerprint = fp;
     },
 
     trackClientClick: function(partnerCode) {
@@ -102,6 +155,9 @@
         if (data.ga_id) {
           self.setIdentity(data.ga_id);
         }
+        // The server sets the _ga_ref cookie directly via Set-Cookie header.
+        // No client-side cookie write needed — the cookie is NOT HttpOnly
+        // so we can read it for beacon forwarding.
         if (self.config.cleanUrl) {
           self.cleanUrl([self.config.viaParam, self.config.refParam]);
         }
@@ -118,7 +174,7 @@
         event_id: this._uuidv4(),
         event_type: eventType,
         ga_id: this.getIdentity(),
-        anonymous_id: this.getCookie(this.config.anonCookieName),
+        anonymous_id: this.getAnonymousId(),
         url: window.location.href,
         referrer: document.referrer,
         timestamp: new Date().toISOString()
@@ -130,6 +186,10 @@
       }
       if (this._fingerprint) payload.fingerprint = this._fingerprint;
       if (this.config.workspaceId) payload.workspace_id = this.config.workspaceId;
+
+      // Include referral cookie token for server-side attribution
+      var refCookie = this.getCookie(this.config.refCookieName);
+      if (refCookie) payload._ga_ref = refCookie;
 
       // Forward connector browser identifiers
       this._addConnectorSignals(payload);
@@ -165,16 +225,56 @@
       return id;
     },
 
+    // Mint (once) and persist a durable, client-side anonymous id. Stored in both
+    // localStorage (durable) and a non-HttpOnly first-party cookie (so host
+    // form/API code can read it). Uses a distinct key from the server-owned
+    // _ga_anon cookie so the two never collide.
+    _ensureAnonymousId: function() {
+      var id = this.getStorage(this.config.anonStorageKey)
+            || this.getCookie(this.config.clientAnonCookieName);
+      if (!id) {
+        id = this._uuidv4(); // null if no CSPRNG; skip silently
+        if (id) {
+          this.setStorage(this.config.anonStorageKey, id);
+          this.setCookie(this.config.clientAnonCookieName, id, this.config.cookieDays);
+        }
+      }
+      this._anonymousId = id;
+    },
+
+    getAnonymousId: function() {
+      return this._anonymousId
+          || this.getStorage(this.config.anonStorageKey)
+          || this.getCookie(this.config.clientAnonCookieName)
+          || this.getCookie(this.config.anonCookieName)
+          || null;
+    },
+
+    getFingerprint: function() { return this._fingerprint || null; },
+
+    getSignals: function() {
+      return {
+        ga_id: this.getIdentity(),
+        anonymous_id: this.getAnonymousId(),
+        fingerprint: this._fingerprint || null
+      };
+    },
+
     forget: function() {
       this.deleteCookie(this.config.cookieName);
       this.deleteCookie(this.config.anonCookieName);
+      this.deleteCookie(this.config.refCookieName);
       try { window.localStorage.removeItem(this.config.identityStorageKey); } catch(e) {}
     },
 
     _sendFingerprintReconcile: function() {
       if (this._fingerprintReconcileSent) return;
       var gaId = this.getIdentity();
-      if (!gaId || !this._fingerprint) return;
+      var anonId = this.getAnonymousId();
+      // Need the fingerprint plus at least one stable id to attach it to. This
+      // fires for anon-only visitors too (no ga_id), so a pageview-created
+      // visitor still accumulates its fingerprint. Never fingerprint-only.
+      if (!this._fingerprint || (!gaId && !anonId)) return;
 
       this._fingerprintReconcileSent = true;
 
@@ -184,7 +284,7 @@
         event_name: 'fingerprint_reconcile',
         reconcile_only: true,
         ga_id: gaId,
-        anonymous_id: this.getCookie(this.config.anonCookieName),
+        anonymous_id: anonId,
         fingerprint: this._fingerprint,
         url: window.location.href,
         referrer: document.referrer,
@@ -357,6 +457,113 @@
 
       this._lastSpaPageview = {url: url, at: now};
       this.track('pageview');
+    },
+
+    // Engagement tracking accrues active time only while the page is both
+    // visible and focused, then flushes an engagement beacon on hide/unload.
+    _setupEngagement: function() {
+      if (this._engagementSetup) return;
+      this._engagementSetup = true;
+
+      this._engagedMs = 0;
+      this._reportedMs = 0;
+      this._maxScrollDepth = 0;
+      this._observedScrollDepth = 0;
+      this._activeSince = null;
+
+      var self = this;
+
+      this._isActive = function() {
+        return document.visibilityState === 'visible' && document.hasFocus();
+      };
+
+      this._resumeEngagement = function() {
+        if (self._activeSince === null && self._isActive()) {
+          self._activeSince = Date.now();
+        }
+      };
+
+      this._accrueEngagement = function() {
+        if (self._activeSince !== null) {
+          self._engagedMs += Date.now() - self._activeSince;
+          self._activeSince = null;
+        }
+      };
+
+      this._currentScrollDepth = function() {
+        var doc = document.documentElement;
+        var scrollable = doc.scrollHeight - doc.clientHeight;
+        if (scrollable <= 0) return 100;
+        var pct = Math.round((doc.scrollTop / scrollable) * 100);
+        return Math.max(0, Math.min(100, pct));
+      };
+
+      this._updateScrollDepth = function() {
+        var depth = self._currentScrollDepth();
+        if (depth > self._observedScrollDepth) self._observedScrollDepth = depth;
+      };
+
+      this._flushEngagement = function() {
+        self._accrueEngagement();
+        self._updateScrollDepth();
+
+        var depth = self._observedScrollDepth;
+        var deltaMs = self._engagedMs - self._reportedMs;
+        var deeper = depth > self._maxScrollDepth;
+
+        if (deltaMs < self.config.engagementThrottleMs && !deeper) return;
+
+        if (self._sendEngagement(Math.max(0, deltaMs), depth)) {
+          if (depth > self._maxScrollDepth) self._maxScrollDepth = depth;
+          self._reportedMs = self._engagedMs;
+        }
+      };
+
+      this._updateScrollDepth();
+      window.addEventListener('scroll', this._updateScrollDepth, false);
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+          self._flushEngagement();
+        } else {
+          self._resumeEngagement();
+        }
+      });
+      window.addEventListener('focus', this._resumeEngagement);
+      window.addEventListener('blur', this._accrueEngagement);
+      window.addEventListener('pagehide', this._flushEngagement);
+
+      this._resumeEngagement();
+    },
+
+    _sendEngagement: function(engagedMs, scrollDepth) {
+      var payload = {
+        event_id: this._uuidv4(),
+        event_type: 'engagement',
+        ga_id: this.getIdentity(),
+        anonymous_id: this.getAnonymousId(),
+        url: window.location.href,
+        engaged_ms: engagedMs,
+        scroll_depth: scrollDepth,
+        timestamp: new Date().toISOString()
+      };
+      if (this._fingerprint) payload.fingerprint = this._fingerprint;
+      if (this.config.workspaceId) payload.workspace_id = this.config.workspaceId;
+
+      var blob = new Blob([JSON.stringify(payload)], {type: 'application/json'});
+      if (navigator.sendBeacon) {
+        if (navigator.sendBeacon(this.config.endpoint + '/event', blob)) return true;
+      }
+
+      if (window.fetch) {
+        fetch(this.config.endpoint + '/event', {
+          method: 'POST',
+          body: blob,
+          keepalive: true
+        });
+        return true;
+      }
+
+      return false;
     },
 
     // Client-side dedup

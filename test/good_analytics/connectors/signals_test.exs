@@ -82,6 +82,19 @@ defmodule GoodAnalytics.Connectors.SignalsTest do
       assert is_binary(ctx["captured_at"])
     end
 
+    test "includes custom event name and URL context when provided" do
+      ctx =
+        Signals.build_source_context(%{"fbclid" => "abc"},
+          event_type: "custom",
+          event_name: "trial_started",
+          url: "https://example.com/signup"
+        )
+
+      assert ctx["event_type"] == "custom"
+      assert ctx["event_name"] == "trial_started"
+      assert ctx["url"] == "https://example.com/signup"
+    end
+
     test "omits nil values" do
       ctx = Signals.build_source_context(%{"gclid" => "abc"})
       refute Map.has_key?(ctx, "visitor_id")
