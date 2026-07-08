@@ -24,15 +24,34 @@ defmodule GoodAnalytics.Connectors.Adapters.TikTok do
 
   @impl true
   def build_payload(dispatch, credentials) do
+    case resolve_event_name(dispatch.source_context) do
+      {:ok, event_name} -> build_payload(dispatch, credentials, event_name)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp resolve_event_name(source_context) do
+    case Map.get(source_context, "event_type") do
+      "custom" ->
+        case get_in(source_context, ["mapping", "connector_event_name"]) do
+          name when is_binary(name) and name != "" -> {:ok, name}
+          _ -> {:error, :missing_event_mapping}
+        end
+
+      "lead" ->
+        {:ok, "SubmitForm"}
+
+      "sale" ->
+        {:ok, "CompletePayment"}
+
+      other ->
+        {:ok, other}
+    end
+  end
+
+  defp build_payload(dispatch, credentials, event_name) do
     source_context = dispatch.source_context
     signals = Map.get(source_context, "signals", %{})
-
-    event_name =
-      case Map.get(source_context, "event_type") do
-        "lead" -> "SubmitForm"
-        "sale" -> "CompletePayment"
-        other -> other
-      end
 
     event = %{
       "event" => event_name,

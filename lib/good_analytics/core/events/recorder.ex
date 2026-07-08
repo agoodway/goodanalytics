@@ -33,7 +33,9 @@ defmodule GoodAnalytics.Core.Events.Recorder do
                       :url,
                       "url",
                       :user_agent,
-                      "user_agent"
+                      "user_agent",
+                      :event_name,
+                      "event_name"
                     ] ++
                       @event_device_fields ++ @event_device_field_strings
 
@@ -63,19 +65,24 @@ defmodule GoodAnalytics.Core.Events.Recorder do
     now = DateTime.utc_now()
 
     connector_signals = Map.get(attrs, :connector_signals, %{})
+    raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
+    # Trim once at ingest so the stored event name matches trimmed connector
+    # mapping names during both immediate planning and later reconciliation.
+    event_name = normalize_event_name(Map.get(attrs, :event_name) || Map.get(attrs, "event_name"))
 
     connector_source_context =
       if map_size(connector_signals) > 0 do
         Signals.build_source_context(connector_signals,
           visitor_id: visitor.id,
           event_type: event_type,
+          event_name: event_name,
+          url: raw_url,
           source: Map.get(attrs, :source, %{}),
           amount_cents: Map.get(attrs, :amount_cents),
           currency: Map.get(attrs, :currency)
         )
       end
 
-    raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
     raw_ua = Map.get(attrs, :user_agent) || Map.get(attrs, "user_agent")
     device = Devices.parse(raw_ua)
 
@@ -86,6 +93,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         workspace_id: visitor.workspace_id,
         visitor_id: visitor.id,
         event_type: event_type,
+        event_name: event_name,
         url: raw_url,
         user_agent: raw_ua,
         host: UrlNormalizer.host(raw_url),
@@ -197,6 +205,9 @@ defmodule GoodAnalytics.Core.Events.Recorder do
 
   defp normalize_source_value(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_source_value(value), do: value
+
+  defp normalize_event_name(value) when is_binary(value), do: String.trim(value)
+  defp normalize_event_name(value), do: value
 
   defp broadcast_event(event) do
     message = {:event_recorded, event}

@@ -79,6 +79,7 @@ defmodule GoodAnalytics.Flows.ConnectorPlanning do
       workspace_id: Map.fetch!(input, "workspace_id"),
       visitor_id: Map.fetch!(input, "visitor_id"),
       event_type: Map.fetch!(input, "event_type"),
+      event_name: Map.get(input, "event_name") || get_in(input, ["source_context", "event_name"]),
       inserted_at: parse_datetime!(Map.fetch!(input, "inserted_at")),
       connector_source_context: Map.get(input, "source_context", %{})
     }
