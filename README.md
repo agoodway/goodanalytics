@@ -235,11 +235,30 @@ plug Plug.Static,
   gzip: false
 ```
 
-Include it in your root layout:
+Include it in your root layout (recommended install — core script + fingerprint self-load):
 
 ```html
 <script src="/ga/js/good-analytics.js"></script>
-<script>GoodAnalytics.init({ endpoint: "/ga/t" });</script>
+<script>
+  GoodAnalytics.init({
+    endpoint: "/ga/t",
+    fingerprint: true
+  });
+</script>
+```
+
+`fingerprint: true` self-loads `thumbmark.js` from the same tracking-host JS base path as `good-analytics.js` (derived from the script `src`, so cross-origin embeds work). Self-load is non-blocking: the initial pageview is not delayed for Thumbmark or vendor fingerprint generation. If the Thumbmark script fails to load (CSP, network, or host policy), the client logs a warning and continues without a live fingerprint.
+
+**CSP:** hosts that use `fingerprint: true` must allow scripts from the tracking host in `script-src` (same host as `good-analytics.js`), because the client may inject `thumbmark.js` and the Thumbmark module may inject `vendor/thumbmark.umd.js`.
+
+**Advanced (explicit two-script install):** the two-script + `.use(ThumbmarkModule)` path remains supported and is idempotent with `fingerprint: true` (no double-init):
+
+```html
+<script src="/ga/js/good-analytics.js"></script>
+<script src="/ga/js/thumbmark.js"></script>
+<script>
+  GoodAnalytics.use(ThumbmarkModule).init({ endpoint: "/ga/t" });
+</script>
 ```
 
 **JS Client options:**
@@ -247,6 +266,8 @@ Include it in your root layout:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `endpoint` | — | Path to the tracking beacon endpoint |
+| `fingerprint` | — | `true` self-loads Thumbmark from the tracking host (non-blocking, after first pageview); a string is a precomputed fingerprint applied **before** the first pageview (no self-load) |
+| `clientAnonymousId` | `false` | Mint and persist a durable client-side anonymous id (non-HttpOnly cookie + localStorage) |
 | `autoSpaNavigation` | `true` | Automatically track SPA navigation (pushState, popstate, hashchange) |
 
 Disable automatic SPA tracking if your app sends manual pageviews:
@@ -256,6 +277,22 @@ Disable automatic SPA tracking if your app sends manual pageviews:
 ```
 
 Every beacon payload includes a UUIDv4 `event_id` idempotency key that host applications can use for retry deduplication.
+
+### Privacy: `GoodAnalytics.forget()`
+
+Call `GoodAnalytics.forget()` on the client to purge all **client-accessible, library-owned** identity state. It best-effort expires non-HttpOnly cookies the library can write and clears matching localStorage keys and in-memory fields:
+
+| Surface | Cleared? |
+|---------|----------|
+| Identity cookie (`_ga_good`) | Yes (best-effort; expires with `path=/;SameSite=Lax` and `Secure` on HTTPS) |
+| Referral cookie (`_ga_ref`) | Yes |
+| Identity localStorage (`_ga_good_id`) | Yes |
+| Fingerprint localStorage (`_ga_good_fp`) + in-memory fingerprint | Yes |
+| Client-anon cookie (`_ga_good_anon`) + storage (`_ga_good_anon_id`) + memory | Yes |
+| Click dedup sessionStorage (`_ga_click_*`) | Yes |
+| Server-owned HttpOnly `_ga_anon` | **No** — not readable/deletable from JS |
+
+After `forget()`, `setFingerprint` no-ops for the rest of the page lifecycle (in-memory suppress only; a full page reload lifts it). Client `forget()` is complementary to server `GoodAnalytics.forget_visitor/1` (which clears server-side visitor fingerprints and related state). On same-origin installs, post-forget beacons may still include HttpOnly `_ga_anon` until the server cookie is expired or rotated — call server `forget_visitor/1` for a full continuity break. Client `forget()` does not permanently prevent browser fingerprint recomputation after reload when a fingerprint module remains installed.
 
 ## Database Migrations
 
