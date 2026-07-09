@@ -78,10 +78,11 @@
         }
       }
 
-      // Initialize modules
+      // Initialize modules registered before init (idempotent with late use).
+      this._initedModules = this._initedModules || [];
       var modules = this._modules || [];
       for (var i = 0; i < modules.length; i++) {
-        if (modules[i].init) modules[i].init(this);
+        this._initModule(modules[i]);
       }
 
       // Establish a durable client anonymous id when enabled (static/SaaS deploys
@@ -92,6 +93,12 @@
       // pageview carries it (the live ThumbmarkJS compute is async and usually
       // resolves after the pageview beacon). First-ever visits reconcile later.
       this._hydrateFingerprint();
+
+      // Precomputed string fingerprint must apply before the first pageview so
+      // the initial beacon includes it. Boolean true self-loads async below.
+      if (typeof this.config.fingerprint === 'string' && this.config.fingerprint) {
+        this.setFingerprint(this.config.fingerprint);
+      }
 
       // Auto-track pageview after init
       if (this.config.autoPageview !== false) {
@@ -104,10 +111,9 @@
         this._setupEngagement();
       }
 
-      // A fingerprint may be supplied at init time (e.g. precomputed server-side
-      // or cached). Async sources should call setFingerprint() once ready.
-      if (this.config.fingerprint) {
-        this.setFingerprint(this.config.fingerprint);
+      // fingerprint: true self-loads Thumbmark from the tracking host (non-blocking).
+      if (this.config.fingerprint === true) {
+        this._ensureFingerprintModule();
       }
 
       return this;
@@ -115,8 +121,10 @@
 
     // Supply a browser fingerprint (e.g. from ThumbmarkJS) as a weak identity
     // signal. Safe to call after init when the fingerprint resolves async; it
-    // reconciles the fingerprint to the current visitor.
+    // reconciles the fingerprint to the current visitor. No-ops after forget()
+    // until a full page reload (suppress is in-memory only).
     setFingerprint: function(fp) {
+      if (this._suppressFingerprint) return;
       if (!fp || this._fingerprint === fp) return;
       this._fingerprint = fp;
       // Cache so the next page load can hydrate it synchronously before the pageview.
@@ -260,11 +268,37 @@
       };
     },
 
+    // Privacy purge of all client-accessible library-owned identity state.
+    // Does NOT attempt to clear the server-owned HttpOnly _ga_anon cookie.
+    // Suppresses setFingerprint for the rest of this page lifecycle (in-memory
+    // only; a full reload lifts the suppress automatically).
     forget: function() {
       this.deleteCookie(this.config.cookieName);
-      this.deleteCookie(this.config.anonCookieName);
       this.deleteCookie(this.config.refCookieName);
+      this.deleteCookie(this.config.clientAnonCookieName);
+      // Intentionally do not touch anonCookieName (_ga_anon) — server-owned HttpOnly.
       try { window.localStorage.removeItem(this.config.identityStorageKey); } catch(e) {}
+      try { window.localStorage.removeItem(this.config.fingerprintStorageKey); } catch(e) {}
+      try { window.localStorage.removeItem(this.config.anonStorageKey); } catch(e) {}
+      this._clearClickDedup();
+      this._fingerprint = null;
+      this._anonymousId = null;
+      this._fingerprintReconcileSent = false;
+      this._suppressFingerprint = true;
+    },
+
+    // Clear client-side click dedup keys (_ga_click_*) from sessionStorage.
+    _clearClickDedup: function() {
+      try {
+        var ss = window.sessionStorage;
+        if (!ss) return;
+        var toRemove = [];
+        for (var i = 0; i < ss.length; i++) {
+          var key = ss.key(i);
+          if (key && key.indexOf('_ga_click_') === 0) toRemove.push(key);
+        }
+        for (var j = 0; j < toRemove.length; j++) ss.removeItem(toRemove[j]);
+      } catch (e) {}
     },
 
     _sendFingerprintReconcile: function() {
@@ -316,12 +350,18 @@
     },
 
     getCookie: function(n) {
-      var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)'));
+      var escaped = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var m = document.cookie.match(new RegExp('(^| )' + escaped + '=([^;]+)'));
       return m ? decodeURIComponent(m[2]) : null;
     },
 
+    // Must mirror setCookie attributes (path/SameSite/Secure) so browsers will
+    // expire the cookie. Without Secure+SameSite on HTTPS, forget() can leave
+    // identity cookies in place.
     deleteCookie: function(n) {
-      document.cookie = n + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+      var secure = window.location.protocol === 'https:' ? ';Secure' : '';
+      document.cookie = n + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT' +
+        ';path=/;SameSite=Lax' + secure;
     },
 
     setStorage: function(key, value) {
@@ -355,11 +395,124 @@
       if (changed) window.history.replaceState({}, '', u.toString());
     },
 
-    // Module system
+    // Module system: register optional modules. Modules registered before
+    // init() run during init; modules registered after init() init immediately.
+    // Dedupes by module object reference (same object only; two literals double-init).
     use: function(m) {
+      if (!m) return this;
       this._modules = this._modules || [];
-      this._modules.push(m);
+      this._initedModules = this._initedModules || [];
+      if (this._modules.indexOf(m) === -1) {
+        this._modules.push(m);
+      }
+      if (this._initialized) {
+        this._initModule(m);
+      }
       return this;
+    },
+
+    _initModule: function(m) {
+      if (!m || !m.init) return;
+      this._initedModules = this._initedModules || [];
+      if (this._initedModules.indexOf(m) !== -1) return;
+      this._initedModules.push(m);
+      m.init(this);
+    },
+
+    // Strict match for the core library script filename (not substring "good-analytics").
+    _isCoreScriptSrc: function(src) {
+      return !!(src && /\/good-analytics(?:\.min)?\.js(?:[?#]|$)/i.test(src));
+    },
+
+    // Match thumbmark.js only (not vendor/thumbmark.umd.js).
+    _isThumbmarkScriptSrc: function(src) {
+      return !!(src && /\/thumbmark\.js(?:[?#]|$)/i.test(src));
+    },
+
+    // Derive the JS base path from the loaded good-analytics.js script src
+    // (cross-origin safe). Prefer currentScript captured at load; fall back to
+    // a strict filename scan; finally same-origin /ga/js.
+    _scriptBaseUrl: function() {
+      if (this._cachedScriptBaseUrl) return this._cachedScriptBaseUrl;
+
+      var src = this._scriptSrc || null;
+      if (!src) {
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+          if (this._isCoreScriptSrc(scripts[i].src)) {
+            src = scripts[i].src;
+            break;
+          }
+        }
+      }
+
+      var base = src ? src.replace(/\/[^\/]*$/, '') : '/ga/js';
+      this._cachedScriptBaseUrl = base;
+      return base;
+    },
+
+    // Non-blocking Thumbmark self-load for init({ fingerprint: true }).
+    // Reuses ThumbmarkModule, an in-flight host thumbmark.js tag, or injects
+    // from the tracking-host base. Clears loading state on error so a later
+    // retry can run; falls back to inject when an existing tag already failed.
+    _ensureFingerprintModule: function() {
+      if (typeof window.ThumbmarkModule !== 'undefined') {
+        this.use(window.ThumbmarkModule);
+        return;
+      }
+      if (this._thumbmarkLoading) return;
+      this._thumbmarkLoading = true;
+
+      var self = this;
+      var onReady = function() {
+        self._thumbmarkLoading = false;
+        if (typeof window.ThumbmarkModule !== 'undefined') {
+          self.use(window.ThumbmarkModule);
+        }
+      };
+      var onError = function() {
+        self._thumbmarkLoading = false;
+        console.warn('[GoodAnalytics] Failed to load thumbmark.js');
+      };
+      var injectFromBase = function() {
+        var script = document.createElement('script');
+        script.src = self._scriptBaseUrl() + '/thumbmark.js';
+        script.onload = onReady;
+        script.onerror = onError;
+        (document.head || document.documentElement).appendChild(script);
+      };
+
+      // Prefer an explicit host-provided thumbmark.js script if already present.
+      var scripts = document.getElementsByTagName('script');
+      for (var i = 0; i < scripts.length; i++) {
+        var existing = scripts[i];
+        if (!this._isThumbmarkScriptSrc(existing.src)) continue;
+
+        if (typeof window.ThumbmarkModule !== 'undefined') {
+          onReady();
+          return;
+        }
+
+        // Already finished without defining the module (failed prior load) → inject.
+        var ready = existing.readyState;
+        if (ready === 'complete' || ready === 'loaded' || existing._gaLoadFailed) {
+          injectFromBase();
+          return;
+        }
+
+        if (existing.addEventListener) {
+          existing.addEventListener('load', onReady);
+          existing.addEventListener('error', function() {
+            // Host tag failed; try tracking-host copy instead of stuck forever.
+            injectFromBase();
+          });
+        }
+        // Script may already have finished loading before we attached listeners.
+        if (typeof window.ThumbmarkModule !== 'undefined') onReady();
+        return;
+      }
+
+      injectFromBase();
     },
 
     // Connector browser identifiers
@@ -582,6 +735,11 @@
       } catch(e) {}
     }
   };
+
+  // Capture this classic script's URL at evaluation time (most reliable base).
+  if (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) {
+    GA._scriptSrc = document.currentScript.src;
+  }
 
   window.GoodAnalytics = GA;
 })();

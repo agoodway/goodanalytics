@@ -41,7 +41,8 @@ defmodule GoodAnalytics.MixProject do
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test,
-        quality: :test
+        quality: :test,
+        precommit: :test
       ]
     ]
   end
@@ -128,6 +129,14 @@ defmodule GoodAnalytics.MixProject do
         "ex_dna",
         "doctor",
         "credo --strict"
+      ],
+      # Full gate including ExUnit (runs node --test for good-analytics.js behavior suite).
+      # Requires Node.js on PATH for tracking JS client tests.
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format --check-formatted",
+        "test"
       ]
     ]
   end
