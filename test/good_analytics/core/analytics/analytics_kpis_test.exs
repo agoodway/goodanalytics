@@ -6,20 +6,18 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window do
-    %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
-  end
+  defp window, do: query_window()
 
   defp event_time, do: ~U[2026-06-10 12:00:00.000000Z]
 
   defp insert_session!(attrs) do
-    now = ~U[2026-06-10 12:00:00.000000Z]
+    t = utc_now()
 
     base = %{
       workspace_id: @ws,
       visitor_id: Uniq.UUID.uuid7(),
-      started_at: now,
-      last_event_at: now
+      started_at: t,
+      last_event_at: t
     }
 
     %Session{id: Uniq.UUID.uuid7()}
@@ -29,8 +27,9 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
 
   describe "kpis/2" do
     test "counts only events matching the filter" do
-      twitter_visitor = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
-      google_visitor = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
+      t = utc_now()
+      twitter_visitor = create_visitor!(%{first_seen_at: t})
+      google_visitor = create_visitor!(%{first_seen_at: t})
 
       record_event!(twitter_visitor, "pageview", %{platform: "twitter", inserted_at: event_time()})
 
@@ -64,8 +63,11 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
     end
 
     test "computes visitors, new_visitors, pageviews, and revenue for the window" do
-      v1 = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
-      v2 = create_visitor!(%{first_seen_at: ~U[2026-05-01 00:00:00.000000Z]})
+      t = utc_now()
+      # New in window
+      v1 = create_visitor!(%{first_seen_at: t})
+      # Returning — first seen before the window
+      v2 = create_visitor!(%{first_seen_at: at(-30, :day)})
 
       record_event!(v1, "pageview", %{path: "/a", inserted_at: event_time()})
       record_event!(v1, "pageview", %{path: "/b", inserted_at: event_time()})
@@ -81,7 +83,8 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
     end
 
     test "identification_rate is identified canonical visitors over total" do
-      identified = create_visitor!(%{identified_at: ~U[2026-06-05 00:00:00.000000Z]})
+      t = utc_now()
+      identified = create_visitor!(%{identified_at: DateTime.add(t, -5, :day)})
       anon = create_visitor!(%{})
 
       record_event!(identified, "pageview", %{path: "/a", inserted_at: event_time()})
@@ -121,7 +124,8 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       # Guards the Task 1 refactor: identification_rate is now computed in the
       # same ga_events JOIN ga_visitors scan as visitors/pageviews, so assert
       # all three are mutually consistent from a single kpis/2 call.
-      identified = create_visitor!(%{identified_at: ~U[2026-06-05 00:00:00.000000Z]})
+      t = utc_now()
+      identified = create_visitor!(%{identified_at: DateTime.add(t, -5, :day)})
       anon = create_visitor!(%{})
 
       record_event!(identified, "pageview", %{path: "/a", inserted_at: event_time()})

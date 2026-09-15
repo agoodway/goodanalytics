@@ -6,18 +6,16 @@ defmodule GoodAnalytics.Core.AnalyticsSessionMetricsTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window do
-    %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
-  end
+  defp window, do: query_window()
 
   defp insert_session!(attrs) do
-    now = ~U[2026-06-10 12:00:00.000000Z]
+    t = utc_now()
 
     base = %{
       workspace_id: @ws,
       visitor_id: Uniq.UUID.uuid7(),
-      started_at: now,
-      last_event_at: now
+      started_at: t,
+      last_event_at: t
     }
 
     %Session{id: Uniq.UUID.uuid7()}

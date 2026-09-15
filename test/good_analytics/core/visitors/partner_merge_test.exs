@@ -31,8 +31,8 @@ defmodule GoodAnalytics.Core.Visitors.PartnerMergeTest do
   defp insert_visitor!(attrs) do
     base = %{
       workspace_id: @workspace_id,
-      first_seen_at: DateTime.utc_now(),
-      last_seen_at: DateTime.utc_now()
+      first_seen_at: utc_now(),
+      last_seen_at: utc_now()
     }
 
     %Visitor{id: Uniq.UUID.uuid7()}

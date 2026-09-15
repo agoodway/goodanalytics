@@ -65,7 +65,7 @@ defmodule GoodAnalytics.Core.Links.QRControllerTest do
     end
 
     test "returns 410 for expired link" do
-      past = DateTime.add(DateTime.utc_now(), -3600, :second)
+      past = DateTime.add(utc_now(), -3600, :second)
       link = create_link!(%{domain: "test.link", url: "https://example.com", expires_at: past})
 
       conn = build_qr_conn("/#{link.key}/qr") |> call_router()

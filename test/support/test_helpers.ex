@@ -14,6 +14,53 @@ defmodule GoodAnalytics.TestHelpers do
 
   def default_workspace_id, do: @workspace_id
 
+  @doc "Current UTC time truncated to `:microsecond` (default) or `:second`."
+  @spec utc_now(:microsecond | :second) :: DateTime.t()
+  def utc_now(precision \\ :microsecond)
+
+  def utc_now(:microsecond) do
+    DateTime.utc_now() |> DateTime.truncate(:microsecond)
+  end
+
+  def utc_now(:second) do
+    DateTime.utc_now() |> DateTime.truncate(:second)
+  end
+
+  @doc """
+  Offset from `utc_now/0`, e.g. `at(-1, :hour)` or `at(-30, :day)`.
+  """
+  def at(offset, unit \\ :second) when is_integer(offset) and is_atom(unit) do
+    utc_now() |> DateTime.add(offset, unit)
+  end
+
+  @doc """
+  Truncates a DateTime to the start of its UTC hour.
+  """
+  def truncate_hour(%DateTime{} = dt) do
+    %{dt | minute: 0, second: 0, microsecond: {0, 6}}
+  end
+
+  @doc """
+  Returns `%{start_at:, end_at:}` around now.
+
+  Options `:before` and `:after` accept an integer day count or `{n, unit}`.
+  Defaults: 14 days before, 1 day after.
+  """
+  def query_window(opts \\ []) do
+    now = utc_now()
+
+    {before_n, before_unit} = offset_parts(Keyword.get(opts, :before, 14))
+    {after_n, after_unit} = offset_parts(Keyword.get(opts, :after, 1))
+
+    %{
+      start_at: DateTime.add(now, -before_n, before_unit),
+      end_at: DateTime.add(now, after_n, after_unit)
+    }
+  end
+
+  defp offset_parts({n, unit}) when is_integer(n) and is_atom(unit), do: {n, unit}
+  defp offset_parts(n) when is_integer(n), do: {n, :day}
+
   @doc """
   Creates a link via `GoodAnalytics.create_link/1`. Raises on failure.
   Generates a unique key by default.
@@ -39,7 +86,7 @@ defmodule GoodAnalytics.TestHelpers do
   Sets workspace_id and timestamps by default.
   """
   def create_visitor!(attrs \\ %{}) do
-    now = DateTime.utc_now()
+    now = utc_now()
 
     attrs =
       Map.merge(

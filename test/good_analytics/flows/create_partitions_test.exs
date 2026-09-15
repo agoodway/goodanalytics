@@ -31,7 +31,7 @@ defmodule GoodAnalytics.Flows.CreatePartitionsTest do
       drop_recent_monthly_partitions!()
       truncate_default!()
 
-      polluting_at = DateTime.utc_now() |> DateTime.truncate(:second)
+      polluting_at = utc_now(:second)
 
       insert_default_event!(
         Ecto.UUID.generate(),

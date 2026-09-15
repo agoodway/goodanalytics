@@ -7,7 +7,7 @@ defmodule GoodAnalytics.Core.EventsFilteredTest do
 
   setup do
     visitor = create_visitor!()
-    now = DateTime.utc_now()
+    now = utc_now()
 
     e1 =
       record_event!(visitor, "pageview", %{
@@ -138,7 +138,7 @@ defmodule GoodAnalytics.Core.EventsFilteredTest do
       # This event is old enough to be outside a 7-day window
       _old_event = record_event!(visitor, "pageview", %{url: "https://old.com"})
 
-      far_past = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+      far_past = DateTime.add(utc_now(), -30 * 86_400, :second)
       results = Events.list_events(@workspace_id, start_at: far_past)
       # Should include all events (the 3 from setup + old_event)
       assert length(results) >= 4

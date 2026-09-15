@@ -7,13 +7,19 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
   @ws GoodAnalytics.default_workspace_id()
   @hour %{key: :hour, label: "1h", seconds: 60 * 60}
 
+  defp t0 do
+    utc_now() |> truncate_hour() |> DateTime.add(-2, :hour)
+  end
+
   # A 2-hour window with explicit hourly bucketing for deterministic buckets.
+  defp hour_window do
+    start = t0()
+    %{start_at: start, end_at: DateTime.add(start, 2, :hour)}
+  end
+
   defp opts do
     [
-      window: %{
-        start_at: ~U[2026-06-10 00:00:00.000000Z],
-        end_at: ~U[2026-06-10 02:00:00.000000Z]
-      },
+      window: hour_window(),
       timezone: "Etc/UTC",
       bucket_interval: @hour
     ]
@@ -45,8 +51,9 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
 
   describe "timeseries/3 — :pageviews" do
     test "buckets pageviews per hour, zero-filling empty buckets" do
-      seed_pageview!(~U[2026-06-10 00:15:00.000000Z])
-      seed_pageview!(~U[2026-06-10 00:45:00.000000Z])
+      base = t0()
+      seed_pageview!(DateTime.add(base, 15, :minute))
+      seed_pageview!(DateTime.add(base, 45, :minute))
       # second hour intentionally empty
 
       buckets = Analytics.timeseries(@ws, :pageviews, opts())
@@ -61,9 +68,10 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
 
   describe "timeseries/3 — :visitors" do
     test "counts distinct canonical visitors per bucket" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:10:00.000000Z], %{path: "/a"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:20:00.000000Z], %{path: "/b"})
+      seed_event!(v, "pageview", DateTime.add(base, 10, :minute), %{path: "/a"})
+      seed_event!(v, "pageview", DateTime.add(base, 20, :minute), %{path: "/b"})
 
       buckets = Analytics.timeseries(@ws, :visitors, opts())
 
@@ -73,9 +81,10 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
 
   describe "timeseries/3 — :revenue" do
     test "sums sale amount_cents per bucket" do
+      base = t0()
       v = create_visitor!()
 
-      seed_event!(v, "sale", ~U[2026-06-10 00:30:00.000000Z], %{
+      seed_event!(v, "sale", DateTime.add(base, 30, :minute), %{
         path: "/buy",
         amount_cents: 2500
       })
@@ -88,9 +97,10 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
 
   describe "timeseries/3 — filters" do
     test "an :eq filter narrows the series to matching events" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:15:00.000000Z], %{source_campaign: "spring"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:45:00.000000Z], %{source_campaign: "summer"})
+      seed_event!(v, "pageview", DateTime.add(base, 15, :minute), %{source_campaign: "spring"})
+      seed_event!(v, "pageview", DateTime.add(base, 45, :minute), %{source_campaign: "summer"})
 
       buckets =
         Analytics.timeseries(
@@ -103,9 +113,10 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "a bare {field, value} filter is treated as :eq (legacy contract)" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:15:00.000000Z], %{source_campaign: "spring"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:45:00.000000Z], %{source_campaign: "summer"})
+      seed_event!(v, "pageview", DateTime.add(base, 15, :minute), %{source_campaign: "spring"})
+      seed_event!(v, "pageview", DateTime.add(base, 45, :minute), %{source_campaign: "summer"})
 
       buckets =
         Analytics.timeseries(
@@ -118,10 +129,11 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "an :ilike filter escapes % as a literal, not a wildcard" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:15:00.000000Z], %{source_campaign: "50%off"})
+      seed_event!(v, "pageview", DateTime.add(base, 15, :minute), %{source_campaign: "50%off"})
 
-      seed_event!(v, "pageview", ~U[2026-06-10 00:45:00.000000Z], %{
+      seed_event!(v, "pageview", DateTime.add(base, 45, :minute), %{
         source_campaign: "50-summer-off"
       })
 
@@ -137,9 +149,10 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "a :neq filter excludes matching events" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:15:00.000000Z], %{source_campaign: "spring"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:45:00.000000Z], %{source_campaign: "summer"})
+      seed_event!(v, "pageview", DateTime.add(base, 15, :minute), %{source_campaign: "spring"})
+      seed_event!(v, "pageview", DateTime.add(base, 45, :minute), %{source_campaign: "summer"})
 
       buckets =
         Analytics.timeseries(
@@ -152,10 +165,11 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "a :not_in filter excludes the given set" do
+      base = t0()
       v = create_visitor!()
-      seed_event!(v, "pageview", ~U[2026-06-10 00:10:00.000000Z], %{source_campaign: "spring"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:20:00.000000Z], %{source_campaign: "summer"})
-      seed_event!(v, "pageview", ~U[2026-06-10 00:30:00.000000Z], %{source_campaign: "fall"})
+      seed_event!(v, "pageview", DateTime.add(base, 10, :minute), %{source_campaign: "spring"})
+      seed_event!(v, "pageview", DateTime.add(base, 20, :minute), %{source_campaign: "summer"})
+      seed_event!(v, "pageview", DateTime.add(base, 30, :minute), %{source_campaign: "fall"})
 
       buckets =
         Analytics.timeseries(
@@ -170,33 +184,53 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
   end
 
   describe "timeseries/3 — non-UTC DST window" do
-    # America/Chicago springs forward on 2026-03-08: the local hour 02:00..03:00
-    # does not exist (clocks jump 01:59:59 CST -> 03:00:00 CDT). Buckets are
-    # built on naive local time, so generate_series still emits a 02:00-local
-    # bucket; converting that non-existent local time back to UTC resolves it to
-    # the same instant as 03:00 CDT (08:00Z), yielding a zero-width, always-empty
-    # bucket. Real event hours bucket and zero-fill normally around it.
+    # America/Chicago springs forward on the second Sunday in March: the local
+    # hour 02:00..03:00 does not exist (clocks jump 01:59:59 CST -> 03:00:00 CDT).
+    # Buckets are built on naive local time, so generate_series still emits a
+    # 02:00-local bucket; converting that non-existent local time back to UTC
+    # resolves it to the same instant as 03:00 CDT (08:00Z), yielding a
+    # zero-width, always-empty bucket. Real event hours bucket and zero-fill
+    # normally around it.
     @chicago "America/Chicago"
 
+    defp second_sunday_of_march(year) do
+      march1 = Date.new!(year, 3, 1)
+      offset_to_first_sunday = rem(7 - Date.day_of_week(march1) + 7, 7)
+      Date.add(march1, offset_to_first_sunday + 7)
+    end
+
+    defp dst_window do
+      year = Date.utc_today().year
+      spring_day = second_sunday_of_march(year)
+
+      # 01:00 CST = 07:00Z; 03:00 CDT = 09:00Z on US spring-forward Sunday.
+      start_utc = DateTime.new!(spring_day, ~T[07:00:00.000000], "Etc/UTC")
+      end_utc = DateTime.new!(spring_day, ~T[09:00:00.000000], "Etc/UTC")
+
+      %{
+        spring_day: spring_day,
+        start_at: start_utc,
+        end_at: end_utc
+      }
+    end
+
     defp dst_opts do
+      window = dst_window()
+
       [
-        # 01:00 CST = 07:00Z; 03:00 CDT = 09:00Z. The naive-local span 01:00..03:00
-        # spans three local bucket starts: 01:00, 02:00 (skipped), 03:00.
-        window: %{
-          start_at: ~U[2026-03-08 07:00:00.000000Z],
-          end_at: ~U[2026-03-08 09:00:00.000000Z]
-        },
+        window: Map.take(window, [:start_at, :end_at]),
         timezone: @chicago,
         bucket_interval: @hour
       ]
     end
 
     test "buckets and zero-fills around the non-existent local hour" do
+      %{spring_day: spring_day, start_at: start_utc} = dst_window()
       v = create_visitor!()
-      # 01:30 CST = 07:30Z -> first local bucket (01:00..02:00 local)
-      seed_event!(v, "pageview", ~U[2026-03-08 07:30:00.000000Z])
-      # 03:30 CDT = 08:30Z -> last local bucket (03:00..04:00 local)
-      seed_event!(v, "pageview", ~U[2026-03-08 08:30:00.000000Z])
+      # +30 min -> first local bucket (01:00..02:00 local)
+      seed_event!(v, "pageview", DateTime.add(start_utc, 30, :minute))
+      # +90 min -> last local bucket (03:00..04:00 local)
+      seed_event!(v, "pageview", DateTime.add(start_utc, 90, :minute))
 
       buckets = Analytics.timeseries(@ws, :pageviews, dst_opts())
 
@@ -210,11 +244,13 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
       assert last.value == 1
 
       # The skipped 02:00 local hour resolves to a zero-width, empty bucket: it
-      # maps to the same UTC instant (08:00Z) on both edges and never matches an
-      # event row.
+      # maps to the same UTC instant (08:00Z on spring-forward day) on both
+      # edges and never matches an event row.
+      gap_expected = DateTime.new!(spring_day, ~T[08:00:00.000000], "Etc/UTC")
+
       assert gap.value == 0
       assert DateTime.compare(gap.bucket_start, gap.bucket_end) == :eq
-      assert DateTime.to_iso8601(gap.bucket_start) == "2026-03-08T08:00:00.000000Z"
+      assert DateTime.to_iso8601(gap.bucket_start) == DateTime.to_iso8601(gap_expected)
 
       # The real data buckets sit one UTC hour apart (01:00 CST -> 03:00 CDT is
       # 60 wall-clock minutes across the spring-forward gap).
@@ -242,15 +278,17 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "buckets session counts by started_at" do
+      base = t0()
+
       insert_session!(%{
-        started_at: ~U[2026-06-10 00:10:00.000000Z],
-        last_event_at: ~U[2026-06-10 00:12:00.000000Z],
+        started_at: DateTime.add(base, 10, :minute),
+        last_event_at: DateTime.add(base, 12, :minute),
         is_engaged: true
       })
 
       insert_session!(%{
-        started_at: ~U[2026-06-10 00:40:00.000000Z],
-        last_event_at: ~U[2026-06-10 00:41:00.000000Z],
+        started_at: DateTime.add(base, 40, :minute),
+        last_event_at: DateTime.add(base, 41, :minute),
         is_engaged: false
       })
 
@@ -261,15 +299,17 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
     end
 
     test "buckets engaged-session counts by started_at" do
+      base = t0()
+
       insert_session!(%{
-        started_at: ~U[2026-06-10 00:10:00.000000Z],
-        last_event_at: ~U[2026-06-10 00:12:00.000000Z],
+        started_at: DateTime.add(base, 10, :minute),
+        last_event_at: DateTime.add(base, 12, :minute),
         is_engaged: true
       })
 
       insert_session!(%{
-        started_at: ~U[2026-06-10 00:40:00.000000Z],
-        last_event_at: ~U[2026-06-10 00:41:00.000000Z],
+        started_at: DateTime.add(base, 40, :minute),
+        last_event_at: DateTime.add(base, 41, :minute),
         is_engaged: false
       })
 

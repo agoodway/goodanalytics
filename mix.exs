@@ -8,7 +8,7 @@ defmodule GoodAnalytics.MixProject do
     [
       app: :good_analytics,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -60,13 +60,13 @@ defmodule GoodAnalytics.MixProject do
   defp deps do
     [
       # Database
-      {:ecto_sql, "~> 3.10"},
-      {:postgrex, "~> 0.17"},
+      {:ecto_sql, "~> 3.14"},
+      {:postgrex, "~> 0.22"},
 
       # Phoenix
-      {:phoenix, "~> 1.7"},
+      {:phoenix, "~> 1.8.14"},
       {:phoenix_pubsub, "~> 2.1"},
-      {:phoenix_live_view, "~> 1.0", optional: true},
+      {:phoenix_live_view, "~> 1.2.11", optional: true},
       {:plug_cowboy, "~> 2.5"},
       {:jason, "~> 1.4"},
 
@@ -100,18 +100,20 @@ defmodule GoodAnalytics.MixProject do
       # QR code generation
       {:qr_code, "~> 3.2"},
 
-      # Infrastructure (GitHub deps)
+      # Infrastructure
       {:ecto_evolver, "~> 0.1.0", override: true},
-      {:pgflow, github: "agoodway/pgflow"},
+      {:pgflow, "~> 0.4.0"},
+      # Required so PgFlow dashboard modules compile (optional dep of pgflow)
+      {:livefilter, "~> 0.2.0"},
 
       # Dev/Test
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
-      {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.7.13", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.15.0", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:doctor, "~> 0.22.0", only: [:dev, :test], runtime: false},
-      {:ex_dna, "~> 1.2", only: [:dev, :test], runtime: false},
-      {:ex_slop, "~> 0.2", only: [:dev, :test], runtime: false},
+      {:doctor, "~> 0.23.0", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18.5", only: [:dev, :test], runtime: false},
       {:mimic, "~> 1.10", only: :test}
     ]

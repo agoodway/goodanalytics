@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Connectors.PostCommitTest do
   use ExUnit.Case, async: false
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Connectors.PostCommit
 
   defmodule TxRepo do
@@ -46,7 +48,7 @@ defmodule GoodAnalytics.Connectors.PostCommitTest do
       workspace_id: "00000000-0000-0000-0000-000000000000",
       visitor_id: "22222222-2222-2222-2222-222222222222",
       event_type: "lead",
-      inserted_at: ~U[2026-04-21 12:00:00.000000Z],
+      inserted_at: utc_now(),
       connector_source_context: %{"signals" => %{"_fbp" => "fb.1.123"}}
     }
 

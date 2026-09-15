@@ -1,30 +1,36 @@
 defmodule GoodAnalytics.Connectors.AdaptersTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Connectors.Adapters.{Google, LinkedIn, Meta, TikTok}
 
-  @dispatch %{
-    id: "dispatch-1",
-    workspace_id: "00000000-0000-0000-0000-000000000000",
-    connector_event_id: "meta_abc123",
-    event_id: "event-1",
-    event_inserted_at: ~U[2026-04-21 12:00:00Z],
-    visitor_id: "visitor-1",
-    source_context: %{
-      "signals" => %{
-        "_fbp" => "fb.1.1234567890.1234567890",
-        "_fbc" => "fb.1.1234567890.abc123",
-        "fbclid" => "click_abc",
-        "gclid" => "google_click_1",
-        "li_fat_id" => "li_uuid_1",
-        "ttclid" => "tiktok_click_1"
-      },
-      "event_type" => "lead",
-      "amount_cents" => 4900,
-      "currency" => "USD",
-      "captured_at" => "2026-04-21T12:00:00Z"
+  defp dispatch do
+    ts = utc_now()
+
+    %{
+      id: "dispatch-1",
+      workspace_id: "00000000-0000-0000-0000-000000000000",
+      connector_event_id: "meta_abc123",
+      event_id: "event-1",
+      event_inserted_at: ts,
+      visitor_id: "visitor-1",
+      source_context: %{
+        "signals" => %{
+          "_fbp" => "fb.1.1234567890.1234567890",
+          "_fbc" => "fb.1.1234567890.abc123",
+          "fbclid" => "click_abc",
+          "gclid" => "google_click_1",
+          "li_fat_id" => "li_uuid_1",
+          "ttclid" => "tiktok_click_1"
+        },
+        "event_type" => "lead",
+        "amount_cents" => 4900,
+        "currency" => "USD",
+        "captured_at" => DateTime.to_iso8601(ts)
+      }
     }
-  }
+  end
 
   # ── Meta ──
 
@@ -44,7 +50,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
 
     test "builds payload with user data and event" do
       creds = %{"access_token" => "token", "pixel_id" => "123"}
-      {:ok, payload} = Meta.build_payload(@dispatch, creds)
+      {:ok, payload} = Meta.build_payload(dispatch(), creds)
 
       assert payload["pixel_id"] == "123"
       [event] = payload["data"]
@@ -56,7 +62,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
     end
 
     test "builds sale payload" do
-      dispatch = put_in(@dispatch.source_context["event_type"], "sale")
+      dispatch = put_in(dispatch().source_context["event_type"], "sale")
       {:ok, payload} = Meta.build_payload(dispatch, %{"pixel_id" => "px"})
       [event] = payload["data"]
       assert event["event_name"] == "Purchase"
@@ -114,7 +120,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
         "access_token" => "token"
       }
 
-      {:ok, payload} = Google.build_payload(@dispatch, creds)
+      {:ok, payload} = Google.build_payload(dispatch(), creds)
       [conversion] = payload["conversions"]
       assert String.contains?(conversion["conversionAction"], "cust123")
       assert String.contains?(conversion["conversionAction"], "action456")
@@ -167,7 +173,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
         "ad_account_id" => "acct123"
       }
 
-      {:ok, payload} = LinkedIn.build_payload(@dispatch, creds)
+      {:ok, payload} = LinkedIn.build_payload(dispatch(), creds)
       [element] = payload["elements"]
       assert String.contains?(element["conversion"], "rule789")
       [user_id] = element["user"]["userIds"]
@@ -213,7 +219,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
 
     test "builds payload with pixel code" do
       creds = %{"access_token" => "token", "pixel_code" => "px123"}
-      {:ok, payload} = TikTok.build_payload(@dispatch, creds)
+      {:ok, payload} = TikTok.build_payload(dispatch(), creds)
 
       assert payload["pixel_code"] == "px123"
       [event] = payload["data"]
@@ -222,7 +228,7 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
     end
 
     test "builds sale payload" do
-      dispatch = put_in(@dispatch.source_context["event_type"], "sale")
+      dispatch = put_in(dispatch().source_context["event_type"], "sale")
       {:ok, payload} = TikTok.build_payload(dispatch, %{"pixel_code" => "px"})
       [event] = payload["data"]
       assert event["event"] == "CompletePayment"

@@ -21,7 +21,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
         create_visitor!(%{anonymous_ids: ["anon-1"]})
 
       vid = visitor.id
-      ts = DateTime.utc_now()
+      ts = utc_now()
 
       assert {:ok, %Session{} = session} =
                sessionize(vid, "pageview", %{url: "https://x.test/a", path: "/a"}, ts)
@@ -35,7 +35,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
 
     test "continues the same session for events under 30 minutes apart" do
       vid = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} = sessionize(vid, "pageview", %{path: "/a"}, t0)
       {:ok, s2} = sessionize(vid, "pageview", %{path: "/b"}, DateTime.add(t0, 20 * 60, :second))
@@ -48,7 +48,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
 
     test "starts a new session after a >30-minute inactivity gap" do
       vid = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} = sessionize(vid, "pageview", %{path: "/a"}, t0)
       {:ok, s2} = sessionize(vid, "pageview", %{path: "/b"}, DateTime.add(t0, 31 * 60, :second))
@@ -60,7 +60,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
   describe "sessionize/3 - acquisition boundary" do
     test "splits when a non-direct acquisition changes mid-window" do
       vid = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} =
         sessionize(
@@ -84,7 +84,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
 
     test "direct-to-known guard: a direct session adopts a later source in place (no split)" do
       vid = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} = sessionize(vid, "pageview", %{path: "/a"}, t0)
 
@@ -106,7 +106,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
     test "keys by anonymous_id when the visitor_id is freshly minted but anon matches" do
       vid1 = create_visitor!().id
       vid2 = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} =
         Sessions.sessionize(
@@ -131,7 +131,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
     test "blank anonymous_id is treated as absent" do
       vid1 = create_visitor!().id
       vid2 = create_visitor!().id
-      t0 = DateTime.utc_now()
+      t0 = utc_now()
 
       {:ok, s1} =
         Sessions.sessionize(
@@ -157,7 +157,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
     test "parallel fresh visitor ids with the same anonymous_id produce one session" do
       visitor_ids = for _ <- 1..8, do: create_visitor!().id
       anonymous_id = "race-anon"
-      ts = DateTime.utc_now()
+      ts = utc_now()
 
       tasks =
         for {vid, i} <- Enum.with_index(visitor_ids, 1) do
@@ -203,7 +203,7 @@ defmodule GoodAnalytics.Core.SessionsTest do
   describe "sessionize/3 - concurrency (advisory lock)" do
     test "parallel same-visitor events produce a single session" do
       vid = create_visitor!().id
-      ts = DateTime.utc_now()
+      ts = utc_now()
 
       tasks =
         for i <- 1..8 do

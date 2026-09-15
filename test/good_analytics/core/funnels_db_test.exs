@@ -181,8 +181,8 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
       {:ok, result} =
         Funnels.analyze(funnel,
-          window_start: DateTime.add(DateTime.utc_now(), -3600),
-          window_end: DateTime.add(DateTime.utc_now(), 3600)
+          window_start: DateTime.add(utc_now(), -3600),
+          window_end: DateTime.add(utc_now(), 3600)
         )
 
       assert result.total_visitors == 1
@@ -232,8 +232,8 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
       {:ok, result} =
         Funnels.analyze(funnel,
-          window_start: DateTime.add(DateTime.utc_now(), -3600),
-          window_end: DateTime.add(DateTime.utc_now(), 3600)
+          window_start: DateTime.add(utc_now(), -3600),
+          window_end: DateTime.add(utc_now(), 3600)
         )
 
       assert result.total_visitors == 2
@@ -291,8 +291,8 @@ defmodule GoodAnalytics.Core.FunnelsDBTest do
 
       {:ok, result} =
         Funnels.analyze(funnel,
-          window_start: DateTime.add(DateTime.utc_now(), -3600),
-          window_end: DateTime.add(DateTime.utc_now(), 3600)
+          window_start: DateTime.add(utc_now(), -3600),
+          window_end: DateTime.add(utc_now(), 3600)
         )
 
       # visitor_both matches both filters, visitor_one matches neither

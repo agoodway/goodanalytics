@@ -1,9 +1,17 @@
 defmodule GoodAnalytics.Core.Funnels.QueryTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Funnels.{Filter, Funnel, Query, Step}
 
   @workspace_id "00000000-0000-0000-0000-000000000001"
+
+  defp funnel_window, do: query_window(before: 30, after: 0)
+
+  defp funnel_start, do: funnel_window().start_at
+
+  defp funnel_end, do: funnel_window().end_at
 
   defp build_funnel(steps, opts \\ []) do
     %Funnel{
@@ -46,8 +54,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
           {"event", "Sale", [%{type: "event", event_type: "sale"}]}
         ])
 
-      window_start = ~U[2026-01-01 00:00:00Z]
-      window_end = ~U[2026-01-31 23:59:59Z]
+      window_start = funnel_start()
+      window_end = funnel_end()
 
       {sql, params} = Query.build_sql(funnel, window_start: window_start, window_end: window_end)
 
@@ -72,8 +80,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "$4 * INTERVAL '1 day'"
@@ -89,8 +97,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       # Extract just the step_2 CTE body (between "step_2 AS" and "SELECT *")
@@ -111,8 +119,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       step_3_cte = String.split(sql, "step_3 AS") |> List.last()
@@ -131,8 +139,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "step_1 AS"
@@ -151,8 +159,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.path"
@@ -168,8 +176,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.path"
@@ -185,8 +193,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.path"
@@ -202,8 +210,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.host"
@@ -227,8 +235,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "e.url LIKE"
@@ -244,8 +252,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.path"
@@ -261,8 +269,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.host"
@@ -285,8 +293,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "e.url ~"
@@ -302,8 +310,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "e.properties->>"
@@ -321,8 +329,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "ANY("
@@ -346,8 +354,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "e.source_platform"
@@ -366,8 +374,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "= ANY("
@@ -384,8 +392,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "COALESCE(e.host"
@@ -410,8 +418,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "e.url = ANY("
@@ -427,8 +435,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       assert sql =~ "1=0"
@@ -449,8 +457,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       # Step 1 should contain AND between the two url filters
@@ -473,8 +481,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, _params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       [_, step_1_rest] = String.split(sql, "step_1 AS", parts: 2)
@@ -494,8 +502,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
         {sql, _params} =
           Query.build_sql(funnel,
-            window_start: ~U[2026-01-01 00:00:00Z],
-            window_end: ~U[2026-01-31 23:59:59Z]
+            window_start: funnel_start(),
+            window_end: funnel_end()
           )
 
         # Single filter — no OR or AND between filters
@@ -527,8 +535,8 @@ defmodule GoodAnalytics.Core.Funnels.QueryTest do
 
       {sql, params} =
         Query.build_sql(funnel,
-          window_start: ~U[2026-01-01 00:00:00Z],
-          window_end: ~U[2026-01-31 23:59:59Z]
+          window_start: funnel_start(),
+          window_end: funnel_end()
         )
 
       # Cohort should be AND-wrapped around the OR group

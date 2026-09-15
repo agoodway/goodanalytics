@@ -125,7 +125,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
         Sessions.sessionize(
           %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
           "pageview",
-          %{path: "/pricing", __ts__: DateTime.utc_now()}
+          %{path: "/pricing", __ts__: utc_now()}
         )
 
       conn =
@@ -184,7 +184,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
         Sessions.sessionize(
           %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: anon_visitor.id},
           "pageview",
-          %{path: "/pricing", __ts__: DateTime.utc_now()}
+          %{path: "/pricing", __ts__: utc_now()}
         )
 
       assert [_candidate_1, _candidate_2] =
@@ -225,7 +225,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
         Sessions.sessionize(
           %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
           "pageview",
-          %{path: "/pricing", __ts__: DateTime.utc_now()}
+          %{path: "/pricing", __ts__: utc_now()}
         )
 
       conn =

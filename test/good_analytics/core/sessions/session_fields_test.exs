@@ -1,17 +1,21 @@
 defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Sessions.SessionFields
 
-  @t0 ~U[2026-06-05 10:00:00.000000Z]
+  defp t0, do: utc_now()
 
   defp new_session(attrs) do
+    t = t0()
+
     base = %{
       workspace_id: "00000000-0000-0000-0000-000000000000",
       visitor_id: Uniq.UUID.uuid7(),
-      started_at: @t0,
-      last_event_at: @t0,
+      started_at: t,
+      last_event_at: t,
       pageviews: 0,
       events: 0,
       duration_seconds: 0,
@@ -25,6 +29,8 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
 
   describe "new_session_attrs/3 — first event" do
     test "seeds entry, source, device, started_at, and counters from a pageview" do
+      t = t0()
+
       attrs = %{
         url: "https://x.test/landing",
         path: "/landing",
@@ -35,10 +41,10 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
         os: "Mac"
       }
 
-      seed = SessionFields.new_session_attrs("pageview", attrs, @t0)
+      seed = SessionFields.new_session_attrs("pageview", attrs, t)
 
-      assert seed.started_at == @t0
-      assert seed.last_event_at == @t0
+      assert seed.started_at == t
+      assert seed.last_event_at == t
       assert seed.entry_url == "https://x.test/landing"
       assert seed.entry_page == "/landing"
       assert seed.exit_page == "/landing"
@@ -52,11 +58,13 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "derives entry and exit page from url when path is missing" do
+      t = t0()
+
       seed =
         SessionFields.new_session_attrs(
           "pageview",
           %{url: "https://x.test/docs/getting-started?utm_source=seed#hero"},
-          @t0
+          t
         )
 
       assert seed.entry_url == "https://x.test/docs/getting-started?utm_source=seed#hero"
@@ -65,7 +73,8 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "a first non-pageview interactive event is not a bounce and counts only as an event" do
-      seed = SessionFields.new_session_attrs("lead", %{path: "/contact"}, @t0)
+      t = t0()
+      seed = SessionFields.new_session_attrs("lead", %{path: "/contact"}, t)
 
       assert seed.pageviews == 0
       assert seed.events == 1
@@ -75,7 +84,8 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "a first non-interactive non-pageview event remains a bounce" do
-      seed = SessionFields.new_session_attrs("session_start", %{path: "/landing"}, @t0)
+      t = t0()
+      seed = SessionFields.new_session_attrs("session_start", %{path: "/landing"}, t)
 
       assert seed.pageviews == 0
       assert seed.events == 1
@@ -86,10 +96,19 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
 
   describe "update_session_attrs/4 — subsequent events" do
     test "second pageview flips bounce, bumps counters, sets exit, and recomputes duration" do
-      live =
-        new_session(%{pageviews: 1, events: 1, entry_page: "/landing", exit_page: "/landing"})
+      t = t0()
 
-      ts = DateTime.add(@t0, 30, :second)
+      live =
+        new_session(%{
+          pageviews: 1,
+          events: 1,
+          entry_page: "/landing",
+          exit_page: "/landing",
+          started_at: t,
+          last_event_at: t
+        })
+
+      ts = DateTime.add(t, 30, :second)
 
       changes = SessionFields.update_session_attrs(live, "pageview", %{path: "/pricing"}, ts)
 
@@ -104,10 +123,19 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "derives exit page from url when a later pageview has no path" do
-      live =
-        new_session(%{pageviews: 1, events: 1, entry_page: "/landing", exit_page: "/landing"})
+      t = t0()
 
-      ts = DateTime.add(@t0, 30, :second)
+      live =
+        new_session(%{
+          pageviews: 1,
+          events: 1,
+          entry_page: "/landing",
+          exit_page: "/landing",
+          started_at: t,
+          last_event_at: t
+        })
+
+      ts = DateTime.add(t, 30, :second)
 
       changes =
         SessionFields.update_session_attrs(
@@ -121,8 +149,9 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "an interactive non-pageview event flips bounce without incrementing pageviews" do
-      live = new_session(%{pageviews: 1, events: 1})
-      ts = DateTime.add(@t0, 5, :second)
+      t = t0()
+      live = new_session(%{pageviews: 1, events: 1, started_at: t, last_event_at: t})
+      ts = DateTime.add(t, 5, :second)
 
       changes = SessionFields.update_session_attrs(live, "lead", %{path: "/contact"}, ts)
 
@@ -133,8 +162,12 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "engagement events do not flip bounce" do
-      live = new_session(%{pageviews: 1, events: 1, is_bounce: true})
-      ts = DateTime.add(@t0, 5, :second)
+      t = t0()
+
+      live =
+        new_session(%{pageviews: 1, events: 1, is_bounce: true, started_at: t, last_event_at: t})
+
+      ts = DateTime.add(t, 5, :second)
 
       changes = SessionFields.update_session_attrs(live, "engagement", %{path: "/landing"}, ts)
 
@@ -145,8 +178,12 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "non-interactive non-pageview events do not flip bounce" do
-      live = new_session(%{pageviews: 1, events: 1, is_bounce: true})
-      ts = DateTime.add(@t0, 5, :second)
+      t = t0()
+
+      live =
+        new_session(%{pageviews: 1, events: 1, is_bounce: true, started_at: t, last_event_at: t})
+
+      ts = DateTime.add(t, 5, :second)
 
       changes = SessionFields.update_session_attrs(live, "session_start", %{path: "/landing"}, ts)
 
@@ -156,9 +193,19 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "duration is capped per-hop at 30 minutes (clock-skew guard)" do
-      live = new_session(%{pageviews: 1, events: 1, duration_seconds: 10})
+      t = t0()
+
+      live =
+        new_session(%{
+          pageviews: 1,
+          events: 1,
+          duration_seconds: 10,
+          started_at: t,
+          last_event_at: t
+        })
+
       # 90-minute jump on a single hop.
-      ts = DateTime.add(@t0, 90 * 60, :second)
+      ts = DateTime.add(t, 90 * 60, :second)
 
       changes = SessionFields.update_session_attrs(live, "pageview", %{path: "/p2"}, ts)
 
@@ -168,8 +215,18 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "engaged via 10s dwell threshold is decided by engaged_seconds, not duration" do
-      live = new_session(%{pageviews: 1, events: 1, engaged_seconds: 12})
-      ts = DateTime.add(@t0, 5, :second)
+      t = t0()
+
+      live =
+        new_session(%{
+          pageviews: 1,
+          events: 1,
+          engaged_seconds: 12,
+          started_at: t,
+          last_event_at: t
+        })
+
+      ts = DateTime.add(t, 5, :second)
 
       changes = SessionFields.update_session_attrs(live, "identify", %{path: "/p1"}, ts)
 
@@ -178,8 +235,18 @@ defmodule GoodAnalytics.Core.Sessions.SessionFieldsTest do
     end
 
     test "out-of-order timestamps do not reduce duration" do
-      live = new_session(%{pageviews: 1, events: 1, duration_seconds: 10})
-      ts = DateTime.add(@t0, -5, :second)
+      t = t0()
+
+      live =
+        new_session(%{
+          pageviews: 1,
+          events: 1,
+          duration_seconds: 10,
+          started_at: t,
+          last_event_at: t
+        })
+
+      ts = DateTime.add(t, -5, :second)
 
       changes = SessionFields.update_session_attrs(live, "pageview", %{path: "/p2"}, ts)
 

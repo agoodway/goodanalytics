@@ -6,16 +6,14 @@ defmodule GoodAnalytics.Core.AnalyticsConversionTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window do
-    %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
-  end
+  defp window, do: query_window()
 
   defp fetch(rows, value), do: Enum.find(rows, &(&1.value == value))
 
   # Monotonic clock inside the window so each seeded row has a distinct inserted_at.
   defp seed_clock do
     n = System.unique_integer([:positive, :monotonic])
-    DateTime.add(~U[2026-06-10 12:00:00.000000Z], n, :microsecond)
+    DateTime.add(utc_now(), -n, :microsecond)
   end
 
   # Direct Event.changeset insert — preserves explicit device_type (Recorder

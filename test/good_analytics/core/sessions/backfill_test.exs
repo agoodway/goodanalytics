@@ -29,7 +29,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "builds sessions and stamps session_id for a visitor's historical events" do
     vid = create_visitor!().id
-    t0 = ~U[2026-05-01 09:00:00.000000Z]
+    t0 = at(-30, :day)
 
     e1 = insert_event!(vid, "pageview", "/a", t0)
     e2 = insert_event!(vid, "pageview", "/b", DateTime.add(t0, 10 * 60, :second))
@@ -53,7 +53,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "is idempotent - a second run does no further work" do
     vid = create_visitor!().id
-    insert_event!(vid, "pageview", "/a", ~U[2026-05-01 09:00:00.000000Z])
+    insert_event!(vid, "pageview", "/a", at(-30, :day))
 
     assert {:ok, %{events: 1, sessions: 1}} = Backfill.run(batch_size: 100)
     assert {:ok, %{events: 0, sessions: 0}} = Backfill.run(batch_size: 100)
@@ -61,7 +61,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "continues sessions across batch boundaries" do
     vid = create_visitor!().id
-    t0 = ~U[2026-05-01 09:00:00.000000Z]
+    t0 = at(-30, :day)
 
     e1 = insert_event!(vid, "pageview", "/a", t0)
     e2 = insert_event!(vid, "pageview", "/b", DateTime.add(t0, 10 * 60, :second))
@@ -73,7 +73,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "derives session entry and exit pages from url when historical events lack path" do
     vid = create_visitor!().id
-    t0 = ~U[2026-05-01 09:00:00.000000Z]
+    t0 = at(-30, :day)
 
     insert_event!(vid, "pageview", nil, t0, %{
       url: "https://x.test/docs/getting-started?utm_source=seed#hero"
@@ -95,7 +95,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "splits same-window historical sessions when acquisition changes" do
     vid = create_visitor!().id
-    t0 = ~U[2026-05-01 09:00:00.000000Z]
+    t0 = at(-30, :day)
 
     e1 =
       insert_event!(vid, "pageview", "/a", t0, %{
@@ -116,7 +116,7 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "a stale selected event is skipped if it was already stamped" do
     vid = create_visitor!().id
-    ts = ~U[2026-05-01 09:00:00.000000Z]
+    ts = at(-30, :day)
     event = insert_event!(vid, "pageview", "/a", ts)
     session_id = Uniq.UUID.uuid7()
 
@@ -130,8 +130,8 @@ defmodule GoodAnalytics.Core.Sessions.BackfillTest do
 
   test "does not attach historical events to future live sessions" do
     vid = create_visitor!().id
-    historical_ts = ~U[2026-05-01 09:00:00.000000Z]
-    future_ts = ~U[2026-05-02 09:00:00.000000Z]
+    historical_ts = at(-30, :day)
+    future_ts = at(-29, :day)
     historical = insert_event!(vid, "pageview", "/historical", historical_ts)
 
     assert {:ok, future_session} =

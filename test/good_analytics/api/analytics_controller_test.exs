@@ -52,7 +52,34 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
 
   defp seed_clock do
     n = System.unique_integer([:positive, :monotonic])
-    DateTime.add(~U[2026-06-15 12:00:00.000000Z], n, :microsecond)
+    DateTime.add(utc_now(), -n, :microsecond)
+  end
+
+  defp window_params do
+    w = query_window()
+    "from=#{DateTime.to_iso8601(w.start_at)}&to=#{DateTime.to_iso8601(w.end_at)}"
+  end
+
+  defp hour_window do
+    start = utc_now() |> truncate_hour() |> DateTime.add(-2, :hour)
+    %{start_at: start, end_at: DateTime.add(start, 2, :hour)}
+  end
+
+  defp hour_window_params do
+    w = hour_window()
+    "from=#{DateTime.to_iso8601(w.start_at)}&to=#{DateTime.to_iso8601(w.end_at)}"
+  end
+
+  defp far_future_window_params do
+    from = at(3650, :day)
+    to = at(3651, :day)
+    "from=#{DateTime.to_iso8601(from)}&to=#{DateTime.to_iso8601(to)}"
+  end
+
+  defp long_window_params do
+    from = at(-365 * 6, :day)
+    to = utc_now()
+    "from=#{DateTime.to_iso8601(from)}&to=#{DateTime.to_iso8601(to)}"
   end
 
   describe "GET /analytics/breakdown — auth" do
@@ -60,7 +87,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z",
+          "/analytics/breakdown?dimension=device_type&#{window_params()}",
           false
         )
 
@@ -71,7 +98,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=events"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=events"
         )
 
       assert conn.status == 200
@@ -93,7 +120,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=events,users"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=events,users"
         )
 
       assert conn.status == 200
@@ -108,7 +135,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=nonsense&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z"
+          "/analytics/breakdown?dimension=nonsense&#{window_params()}"
         )
 
       assert conn.status == 422
@@ -118,17 +145,19 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=bogus"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=bogus"
         )
 
       assert conn.status == 422
     end
 
     test "422 on a malformed date" do
+      to = query_window().end_at
+
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=not-a-date&to=2026-06-30T00:00:00Z"
+          "/analytics/breakdown?dimension=device_type&from=not-a-date&to=#{DateTime.to_iso8601(to)}"
         )
 
       assert conn.status == 422
@@ -138,7 +167,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=country&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=sessions"
+          "/analytics/breakdown?dimension=country&#{window_params()}&metrics=sessions"
         )
 
       assert conn.status == 422
@@ -152,7 +181,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=browser&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=events&filter=device_type:desktop"
+          "/analytics/breakdown?dimension=browser&#{window_params()}&metrics=events&filter=device_type:desktop"
         )
 
       assert conn.status == 200
@@ -164,14 +193,15 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
 
   describe "GET /analytics/timeseries" do
     test "buckets pageviews per hour with zero-fill" do
+      base = hour_window().start_at
       v = create_visitor!()
-      seed_event!(v, "pageview", %{path: "/a", inserted_at: ~U[2026-06-10 00:15:00.000000Z]})
-      seed_event!(v, "pageview", %{path: "/b", inserted_at: ~U[2026-06-10 00:45:00.000000Z]})
+      seed_event!(v, "pageview", %{path: "/a", inserted_at: DateTime.add(base, 15, :minute)})
+      seed_event!(v, "pageview", %{path: "/b", inserted_at: DateTime.add(base, 45, :minute)})
 
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z&interval=1h"
+          "/analytics/timeseries?metric=pageviews&#{hour_window_params()}&interval=1h"
         )
 
       assert conn.status == 200
@@ -186,13 +216,14 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
     end
 
     test "echoes the resolved interval label when none is requested" do
+      base = hour_window().start_at
       v = create_visitor!()
-      seed_event!(v, "pageview", %{path: "/a", inserted_at: ~U[2026-06-10 00:15:00.000000Z]})
+      seed_event!(v, "pageview", %{path: "/a", inserted_at: DateTime.add(base, 15, :minute)})
 
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z"
+          "/analytics/timeseries?metric=pageviews&#{hour_window_params()}"
         )
 
       assert conn.status == 200
@@ -203,7 +234,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=bogus&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z"
+          "/analytics/timeseries?metric=bogus&#{hour_window_params()}"
         )
 
       assert conn.status == 422
@@ -216,7 +247,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=sessions&filter=country:US"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=sessions&filter=country:US"
         )
 
       assert conn.status == 422
@@ -229,7 +260,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z&interval=1h&timezone=Not/AZone"
+          "/analytics/timeseries?metric=pageviews&#{hour_window_params()}&interval=1h&timezone=Not/AZone"
         )
 
       assert conn.status == 422
@@ -237,10 +268,12 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
 
     # W3 — from >= to rejected
     test "422 when from is not before to" do
+      w = hour_window()
+
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T02:00:00Z&to=2026-06-10T00:00:00Z&interval=1h"
+          "/analytics/timeseries?metric=pageviews&from=#{DateTime.to_iso8601(w.end_at)}&to=#{DateTime.to_iso8601(w.start_at)}&interval=1h"
         )
 
       assert conn.status == 422
@@ -251,7 +284,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2020-01-01T00:00:00Z&to=2026-01-01T00:00:00Z&interval=1m"
+          "/analytics/timeseries?metric=pageviews&#{long_window_params()}&interval=1m"
         )
 
       assert conn.status == 422
@@ -262,7 +295,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z&interval=bogus"
+          "/analytics/timeseries?metric=pageviews&#{hour_window_params()}&interval=bogus"
         )
 
       assert conn.status == 422
@@ -270,13 +303,13 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
   end
 
   defp insert_session!(attrs) do
-    now = ~U[2026-06-10 12:00:00.000000Z]
+    t = utc_now()
 
     base = %{
       workspace_id: @workspace_id,
       visitor_id: Uniq.UUID.uuid7(),
-      started_at: now,
-      last_event_at: now
+      started_at: t,
+      last_event_at: t
     }
 
     %Session{id: Uniq.UUID.uuid7()}
@@ -304,7 +337,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=events,sessions,bounce_rate,avg_duration,engaged_rate"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=events,sessions,bounce_rate,avg_duration,engaged_rate"
         )
 
       assert conn.status == 200
@@ -331,7 +364,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=country&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z"
+          "/analytics/breakdown?dimension=country&#{window_params()}"
         )
 
       assert conn.status == 200
@@ -350,7 +383,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&metrics=events&order=asc&limit=1"
+          "/analytics/breakdown?dimension=device_type&#{window_params()}&metrics=events&order=asc&limit=1"
         )
 
       assert conn.status == 200
@@ -363,7 +396,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=device_type&from=2099-01-01T00:00:00Z&to=2099-02-01T00:00:00Z"
+          "/analytics/breakdown?dimension=device_type&#{far_future_window_params()}"
         )
 
       assert conn.status == 200
@@ -378,7 +411,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=browser&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&filter=nocolon"
+          "/analytics/breakdown?dimension=browser&#{window_params()}&filter=nocolon"
         )
 
       assert conn.status == 422
@@ -388,7 +421,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=browser&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&filter=device_type:"
+          "/analytics/breakdown?dimension=browser&#{window_params()}&filter=device_type:"
         )
 
       assert conn.status == 422
@@ -398,7 +431,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/breakdown?dimension=browser&from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z&filter=unknown:x"
+          "/analytics/breakdown?dimension=browser&#{window_params()}&filter=unknown:x"
         )
 
       assert conn.status == 422
@@ -407,13 +440,14 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
 
   describe "GET /analytics/timeseries — timezone wiring" do
     test "accepts a valid IANA timezone and returns buckets" do
+      base = hour_window().start_at
       v = create_visitor!()
-      seed_event!(v, "pageview", %{path: "/a", inserted_at: ~U[2026-06-10 00:15:00.000000Z]})
+      seed_event!(v, "pageview", %{path: "/a", inserted_at: DateTime.add(base, 15, :minute)})
 
       conn =
         api_conn(
           :get,
-          "/analytics/timeseries?metric=pageviews&from=2026-06-10T00:00:00Z&to=2026-06-10T02:00:00Z&interval=1h&timezone=America/New_York"
+          "/analytics/timeseries?metric=pageviews&#{hour_window_params()}&interval=1h&timezone=America/New_York"
         )
 
       assert conn.status == 200
@@ -426,7 +460,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
 
   describe "GET /analytics/summary" do
     test "returns KPI counts for the window" do
-      v1 = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
+      v1 = create_visitor!(%{first_seen_at: utc_now()})
       seed_event!(v1, "pageview", %{path: "/a"})
       seed_event!(v1, "pageview", %{path: "/b"})
       seed_event!(v1, "sale", %{path: "/buy", amount_cents: 5000})
@@ -434,7 +468,7 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
       conn =
         api_conn(
           :get,
-          "/analytics/summary?from=2026-06-01T00:00:00Z&to=2026-06-30T00:00:00Z"
+          "/analytics/summary?#{window_params()}"
         )
 
       assert conn.status == 200
@@ -447,7 +481,9 @@ defmodule GoodAnalytics.Api.AnalyticsControllerTest do
     end
 
     test "422 on a missing date range" do
-      conn = api_conn(:get, "/analytics/summary?from=2026-06-01T00:00:00Z")
+      conn =
+        api_conn(:get, "/analytics/summary?from=#{DateTime.to_iso8601(query_window().start_at)}")
+
       assert conn.status == 422
     end
   end

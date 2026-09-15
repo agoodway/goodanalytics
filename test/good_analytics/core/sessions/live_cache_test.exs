@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Core.Sessions.LiveCacheTest do
   use ExUnit.Case, async: false
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Sessions.LiveCache
 
   setup do
@@ -13,7 +15,7 @@ defmodule GoodAnalytics.Core.Sessions.LiveCacheTest do
 
   test "put then get returns the cached entry" do
     vid = Uniq.UUID.uuid7()
-    entry = %{session_id: Uniq.UUID.uuid7(), last_event_at: DateTime.utc_now()}
+    entry = %{session_id: Uniq.UUID.uuid7(), last_event_at: utc_now()}
 
     assert LiveCache.get(@ws, vid) == :miss
     LiveCache.put(@ws, vid, entry)
@@ -22,7 +24,7 @@ defmodule GoodAnalytics.Core.Sessions.LiveCacheTest do
 
   test "delete removes the entry" do
     vid = Uniq.UUID.uuid7()
-    LiveCache.put(@ws, vid, %{session_id: Uniq.UUID.uuid7(), last_event_at: DateTime.utc_now()})
+    LiveCache.put(@ws, vid, %{session_id: Uniq.UUID.uuid7(), last_event_at: utc_now()})
     LiveCache.delete(@ws, vid)
     assert LiveCache.get(@ws, vid) == :miss
   end

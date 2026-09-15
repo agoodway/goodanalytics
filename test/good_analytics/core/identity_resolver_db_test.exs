@@ -185,8 +185,8 @@ defmodule GoodAnalytics.Core.IdentityResolverDBTest do
       ga_id = "fc_order_#{System.unique_integer([:positive])}"
       fp = "fc_order_fp_#{System.unique_integer([:positive])}"
 
-      v_old = create_visitor!(%{ga_id: ga_id, first_seen_at: ~U[2025-01-01 00:00:00Z]})
-      _v_new = create_visitor!(%{fingerprints: [fp], first_seen_at: ~U[2026-01-01 00:00:00Z]})
+      v_old = create_visitor!(%{ga_id: ga_id, first_seen_at: at(-395, :day)})
+      _v_new = create_visitor!(%{fingerprints: [fp], first_seen_at: at(-30, :day)})
 
       candidates =
         IdentityResolver.find_candidates(%{ga_id: ga_id, fingerprint: fp}, @workspace_id)
@@ -300,7 +300,7 @@ defmodule GoodAnalytics.Core.IdentityResolverDBTest do
     end
 
     test "geo follows earliest first_seen_at on merge (primary wins when oldest)" do
-      now = DateTime.utc_now()
+      now = utc_now()
 
       {:ok, primary} = IdentityResolver.create_visitor(%{ga_id: "m_geo_p"}, @workspace_id)
 
@@ -328,7 +328,7 @@ defmodule GoodAnalytics.Core.IdentityResolverDBTest do
     end
 
     test "geo adopts non-empty value when primary geo is empty" do
-      now = DateTime.utc_now()
+      now = utc_now()
 
       {:ok, primary} = IdentityResolver.create_visitor(%{ga_id: "m_geo_e_p"}, @workspace_id)
 

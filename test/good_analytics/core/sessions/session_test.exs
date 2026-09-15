@@ -1,9 +1,11 @@
 defmodule GoodAnalytics.Core.Sessions.SessionTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Sessions.Session
 
-  @now DateTime.utc_now()
+  @now utc_now()
 
   @valid_attrs %{
     workspace_id: "00000000-0000-0000-0000-000000000000",

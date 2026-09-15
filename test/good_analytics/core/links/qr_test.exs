@@ -48,7 +48,7 @@ defmodule GoodAnalytics.Core.Links.QRTest do
     end
 
     test "returns {:error, :expired} for expired link" do
-      past = DateTime.add(DateTime.utc_now(), -3600, :second)
+      past = DateTime.add(utc_now(), -3600, :second)
       link = create_link!(%{domain: "test.link", url: "https://example.com", expires_at: past})
       assert {:error, :expired} = QR.generate("test.link", link.key)
     end
@@ -113,7 +113,7 @@ defmodule GoodAnalytics.Core.Links.QRTest do
     end
 
     test "cache entry expires with TTL so expired links are not served stale" do
-      future = DateTime.add(DateTime.utc_now(), 2, :second)
+      future = DateTime.add(utc_now(), 2, :second)
       link = create_link!(%{domain: "test.link", url: "https://example.com", expires_at: future})
 
       assert {:ok, _svg} = QR.generate("test.link", link.key)

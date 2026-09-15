@@ -12,13 +12,12 @@ defmodule GoodAnalytics.Core.AudienceParityTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window,
-    do: %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
+  defp window, do: query_window()
 
   # Monotonic-ish clock inside window/0 so each seeded row is distinct.
   defp seed_clock do
     n = System.unique_integer([:positive, :monotonic])
-    DateTime.add(~U[2026-06-15 12:00:00.000000Z], n, :microsecond)
+    DateTime.add(utc_now(), -n, :microsecond)
   end
 
   # Visitor whose `device` JSON matches the device columns on its events.

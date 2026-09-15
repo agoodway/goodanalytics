@@ -121,7 +121,7 @@ defmodule GoodAnalytics.Core.Events.RecorderDBTest do
 
     test "stamps inserted_at on insert (composite PK requirement)" do
       visitor = create_visitor!()
-      before_call = DateTime.utc_now()
+      before_call = utc_now()
 
       assert {:ok, event} = Recorder.record(visitor, "pageview", %{url: "https://test.com"})
 

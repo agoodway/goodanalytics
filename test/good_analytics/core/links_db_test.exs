@@ -128,7 +128,7 @@ defmodule GoodAnalytics.Core.LinksDBTest do
     end
 
     test "returns expired for expired link" do
-      past = DateTime.add(DateTime.utc_now(:second), -60, :second)
+      past = DateTime.add(utc_now(:second), -60, :second)
 
       create_link!(%{
         domain: "legacy.link",
@@ -154,14 +154,14 @@ defmodule GoodAnalytics.Core.LinksDBTest do
     end
 
     test "returns :expired when the only matching link is expired" do
-      past = DateTime.add(DateTime.utc_now(:second), -60, :second)
+      past = DateTime.add(utc_now(:second), -60, :second)
       create_link!(%{domain: "beta.link", key: "deadkey", expires_at: past})
 
       assert {:error, :expired} = Links.resolve_live_link_by_key("deadkey")
     end
 
     test "resolves the single live link when an expired one shares the key" do
-      past = DateTime.add(DateTime.utc_now(:second), -60, :second)
+      past = DateTime.add(utc_now(:second), -60, :second)
       create_link!(%{domain: "old.link", key: "dupkey", expires_at: past})
       live = create_link!(%{domain: "new.link", key: "dupkey"})
 

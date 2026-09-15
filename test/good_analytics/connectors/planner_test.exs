@@ -23,7 +23,7 @@ defmodule GoodAnalytics.Connectors.PlannerTest do
   describe "EventId.derive/3" do
     test "produces deterministic IDs" do
       event_id = "11111111-1111-1111-1111-111111111111"
-      ts = ~U[2026-04-21 12:00:00Z]
+      ts = utc_now()
 
       id1 = EventId.derive(event_id, ts, :meta)
       id2 = EventId.derive(event_id, ts, :meta)
@@ -32,7 +32,7 @@ defmodule GoodAnalytics.Connectors.PlannerTest do
 
     test "different connector types produce different IDs" do
       event_id = "11111111-1111-1111-1111-111111111111"
-      ts = ~U[2026-04-21 12:00:00Z]
+      ts = utc_now()
 
       meta_id = EventId.derive(event_id, ts, :meta)
       google_id = EventId.derive(event_id, ts, :google)
@@ -40,12 +40,12 @@ defmodule GoodAnalytics.Connectors.PlannerTest do
     end
 
     test "includes connector type prefix" do
-      id = EventId.derive("abc", ~U[2026-01-01 00:00:00Z], :tiktok)
+      id = EventId.derive("abc", utc_now(), :tiktok)
       assert String.starts_with?(id, "tiktok_")
     end
 
     test "different events produce different IDs" do
-      ts = ~U[2026-04-21 12:00:00Z]
+      ts = utc_now()
       id1 = EventId.derive("event-1", ts, :meta)
       id2 = EventId.derive("event-2", ts, :meta)
       assert id1 != id2
@@ -215,7 +215,7 @@ defmodule GoodAnalytics.Connectors.PlannerTest do
       workspace_id: workspace_id,
       visitor_id: "22222222-2222-2222-2222-222222222222",
       event_type: event_type,
-      inserted_at: ~U[2026-04-21 12:00:00.000000Z],
+      inserted_at: utc_now(),
       connector_source_context: %{}
     }
   end

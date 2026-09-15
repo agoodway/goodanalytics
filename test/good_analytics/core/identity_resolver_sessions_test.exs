@@ -7,7 +7,7 @@ defmodule GoodAnalytics.Core.IdentityResolverSessionsTest do
   @ws GoodAnalytics.default_workspace_id()
 
   defp insert_session!(visitor_id, attrs) do
-    now = DateTime.utc_now()
+    now = utc_now()
 
     %Session{id: Uniq.UUID.uuid7()}
     |> Session.changeset(
@@ -27,13 +27,13 @@ defmodule GoodAnalytics.Core.IdentityResolverSessionsTest do
   test "merge_visitors reassigns ga_sessions.visitor_id to the primary" do
     older =
       create_visitor!(%{
-        first_seen_at: ~U[2026-06-01 00:00:00.000000Z],
+        first_seen_at: at(-2, :day),
         ga_id: "ga-primary"
       })
 
     newer =
       create_visitor!(%{
-        first_seen_at: ~U[2026-06-02 00:00:00.000000Z],
+        first_seen_at: at(-1, :day),
         ga_id: "ga-primary"
       })
 

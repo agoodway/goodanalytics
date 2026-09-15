@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Core.Visitors.VisitorTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Visitors.Visitor
 
   @valid_attrs %{
@@ -69,7 +71,7 @@ defmodule GoodAnalytics.Core.Visitors.VisitorTest do
           person_external_id: "cust_123",
           person_email: "test@example.com",
           status: "identified",
-          identified_at: DateTime.utc_now()
+          identified_at: utc_now()
         })
 
       assert changeset.valid?

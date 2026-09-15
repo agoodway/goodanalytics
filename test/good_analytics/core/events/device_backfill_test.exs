@@ -10,7 +10,7 @@ defmodule GoodAnalytics.Core.Events.DeviceBackfillTest do
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
   defp insert_legacy_event!(attrs) do
-    seed = %Event{id: Uniq.UUID.uuid7(), inserted_at: DateTime.utc_now()}
+    seed = %Event{id: Uniq.UUID.uuid7(), inserted_at: utc_now()}
 
     cast_attrs =
       Map.merge(
@@ -94,8 +94,8 @@ defmodule GoodAnalytics.Core.Events.DeviceBackfillTest do
 
     test "updates rows by composite id and inserted_at" do
       id = Uniq.UUID.uuid7()
-      first_at = ~U[2026-01-01 00:00:00.000000Z]
-      second_at = ~U[2026-01-02 00:00:00.000000Z]
+      first_at = at(-30, :day)
+      second_at = at(-29, :day)
 
       first = insert_legacy_event_with_id!(id, first_at, %{user_agent: @desktop_ua})
       second = insert_legacy_event_with_id!(id, second_at, %{user_agent: @desktop_ua})

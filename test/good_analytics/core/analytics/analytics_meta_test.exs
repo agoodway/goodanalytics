@@ -1,6 +1,8 @@
 defmodule GoodAnalytics.Core.AnalyticsMetaTest do
   use ExUnit.Case, async: true
 
+  import GoodAnalytics.TestHelpers
+
   alias GoodAnalytics.Core.Analytics
 
   describe "breakdown_dimensions/0" do
@@ -39,18 +41,22 @@ defmodule GoodAnalytics.Core.AnalyticsMetaTest do
 
   describe "bucket_interval/1" do
     test "picks a sub-hour bucket for a one-hour window" do
+      t = utc_now() |> truncate_hour()
+
       window = %{
-        start_at: ~U[2026-06-01 00:00:00.000000Z],
-        end_at: ~U[2026-06-01 01:00:00.000000Z]
+        start_at: t,
+        end_at: DateTime.add(t, 1, :hour)
       }
 
       assert Analytics.bucket_interval(window).key == :minute
     end
 
     test "picks an hourly bucket for a one-day window" do
+      t = utc_now() |> truncate_hour()
+
       window = %{
-        start_at: ~U[2026-06-01 00:00:00.000000Z],
-        end_at: ~U[2026-06-02 00:00:00.000000Z]
+        start_at: t,
+        end_at: DateTime.add(t, 1, :day)
       }
 
       assert Analytics.bucket_interval(window).key == :hour
@@ -58,8 +64,8 @@ defmodule GoodAnalytics.Core.AnalyticsMetaTest do
 
     test "falls back to the coarsest bucket for a very long window" do
       window = %{
-        start_at: ~U[2020-01-01 00:00:00.000000Z],
-        end_at: ~U[2026-01-01 00:00:00.000000Z]
+        start_at: at(-365 * 6, :day),
+        end_at: utc_now()
       }
 
       assert Analytics.bucket_interval(window).key == :month
@@ -68,9 +74,11 @@ defmodule GoodAnalytics.Core.AnalyticsMetaTest do
     test "crosses the sub-hour regime edge just past one hour" do
       # 61 minutes: just over the <= 1h target-of-60 regime, so the target drops
       # to 24 buckets and the ladder picks the 5-minute interval.
+      t = utc_now()
+
       window = %{
-        start_at: ~U[2026-06-01 00:00:00.000000Z],
-        end_at: ~U[2026-06-01 01:01:00.000000Z]
+        start_at: t,
+        end_at: DateTime.add(t, 61, :minute)
       }
 
       assert Analytics.bucket_interval(window).key == :minute_5
@@ -79,9 +87,11 @@ defmodule GoodAnalytics.Core.AnalyticsMetaTest do
     test "crosses the multi-hour regime edge just past one day" do
       # 25 hours: past the <= 1d target-of-24 regime, so the target rises to 60
       # buckets and the ladder picks the 30-minute interval.
+      t = utc_now() |> truncate_hour()
+
       window = %{
-        start_at: ~U[2026-06-01 00:00:00.000000Z],
-        end_at: ~U[2026-06-02 01:00:00.000000Z]
+        start_at: t,
+        end_at: DateTime.add(t, 25, :hour)
       }
 
       assert Analytics.bucket_interval(window).key == :minute_30
