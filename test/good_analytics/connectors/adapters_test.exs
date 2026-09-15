@@ -263,11 +263,13 @@ defmodule GoodAnalytics.Connectors.AdaptersTest do
   end
 
   defp custom_dispatch(connector_type, mapping) do
+    dispatch = dispatch()
+
     %{
-      @dispatch
+      dispatch
       | connector_event_id: "#{connector_type}_custom_abc123",
         source_context:
-          Map.merge(@dispatch.source_context, %{
+          Map.merge(dispatch.source_context, %{
             "event_type" => "custom",
             "event_name" => "trial_started",
             "mapping" =>

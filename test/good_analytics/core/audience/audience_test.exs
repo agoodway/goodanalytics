@@ -6,7 +6,10 @@ defmodule GoodAnalytics.Core.AudienceTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window, do: query_window()
+  # A wide-open window covering all seeded rows.
+  defp window do
+    %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
+  end
 
   defp event_time, do: ~U[2026-06-15 12:00:00.000000Z]
 
@@ -28,7 +31,7 @@ defmodule GoodAnalytics.Core.AudienceTest do
         device_attrs
       )
 
-    %Event{id: Uniq.UUID.uuid7(), inserted_at: seed_clock()}
+    %Event{id: Uniq.UUID.uuid7(), inserted_at: ~U[2026-06-15 12:00:00.000000Z]}
     |> Event.changeset(attrs)
     |> GoodAnalytics.TestRepo.insert!(prefix: "good_analytics")
 
@@ -61,7 +64,7 @@ defmodule GoodAnalytics.Core.AudienceTest do
   # Monotonic-ish clock inside window/0 so each seeded row is distinct.
   defp seed_clock do
     n = System.unique_integer([:positive, :monotonic])
-    DateTime.add(utc_now(), -n, :microsecond)
+    DateTime.add(~U[2026-06-15 12:00:00.000000Z], n, :microsecond)
   end
 
   defp fetch(rows, value), do: Enum.find(rows, &(&1.value == value))
@@ -101,7 +104,10 @@ defmodule GoodAnalytics.Core.AudienceTest do
     test "returns [] for an empty window" do
       seed_pageview!(%{device_type: "desktop"})
 
-      empty = %{start_at: at(3650, :day), end_at: at(3651, :day)}
+      empty = %{
+        start_at: ~U[2030-01-01 00:00:00.000000Z],
+        end_at: ~U[2030-01-02 00:00:00.000000Z]
+      }
 
       assert Audience.breakdown(@ws, :device_type, window: empty, metrics: [:events]) == []
     end
@@ -259,13 +265,13 @@ defmodule GoodAnalytics.Core.AudienceTest do
     alias GoodAnalytics.Core.Sessions.Session
 
     defp insert_session!(attrs) do
-      t = utc_now()
+      now = ~U[2026-06-10 12:00:00.000000Z]
 
       base = %{
         workspace_id: @ws,
         visitor_id: Uniq.UUID.uuid7(),
-        started_at: t,
-        last_event_at: t
+        started_at: now,
+        last_event_at: now
       }
 
       %Session{id: Uniq.UUID.uuid7()}

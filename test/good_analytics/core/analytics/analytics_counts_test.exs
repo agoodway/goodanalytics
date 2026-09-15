@@ -5,7 +5,9 @@ defmodule GoodAnalytics.Core.AnalyticsCountsTest do
 
   @ws GoodAnalytics.default_workspace_id()
 
-  defp window, do: query_window()
+  defp window do
+    %{start_at: ~U[2026-06-01 00:00:00.000000Z], end_at: ~U[2026-06-30 00:00:00.000000Z]}
+  end
 
   defp event_time, do: ~U[2026-06-10 12:00:00.000000Z]
 
