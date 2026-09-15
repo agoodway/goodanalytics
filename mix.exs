@@ -101,7 +101,7 @@ defmodule GoodAnalytics.MixProject do
       {:qr_code, "~> 3.2"},
 
       # Infrastructure
-      {:ecto_evolver, "~> 0.1.0", override: true},
+      {:ecto_evolver, "~> 0.1.0"},
       {:pgflow, "~> 0.4.0"},
       # Required so PgFlow dashboard modules compile (optional dep of pgflow)
       {:livefilter, "~> 0.2.0"},
