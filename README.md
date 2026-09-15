@@ -16,11 +16,21 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 
 ## Prerequisites
 
-- Elixir 1.17+
+- Elixir 1.18+
 - PostgreSQL 14+
 - An existing Phoenix application with an Ecto repository
 
 ## Installation
+
+### From Hex
+
+```elixir
+def deps do
+  [
+    {:good_analytics, "~> 0.1.1"}
+  ]
+end
+```
 
 ### As a Git Dependency
 
