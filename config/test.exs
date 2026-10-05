@@ -1,9 +1,17 @@
 import Config
 
+# PGPORT selects the Postgres port for local runs; unset or empty means 5432.
+pg_port =
+  case System.get_env("PGPORT") do
+    value when value in [nil, ""] -> 5432
+    value -> String.to_integer(value)
+  end
+
 config :good_analytics, GoodAnalytics.TestRepo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
+  port: pg_port,
   database: "good_analytics_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2

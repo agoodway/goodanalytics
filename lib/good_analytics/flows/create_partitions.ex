@@ -13,10 +13,14 @@ defmodule GoodAnalytics.Flows.CreatePartitions do
        repo: MyApp.Repo,
        flows: [GoodAnalytics.Flows.CreatePartitions]}
 
-  Then generate and run the flow migration:
+  Workers compile the flow definition at startup. To compile it ahead of
+  time in a migration instead:
 
-      mix pgflow.gen.flow GoodAnalytics.Flows.CreatePartitions
+      mix pgflow.gen.flow_migration GoodAnalytics.Flows.CreatePartitions
       mix ecto.migrate
+
+  Requires PgFlow 0.5 with core schema version 2 and helpers version 6
+  (`mix pgflow.check_schema`).
 
   To trigger manually:
 

@@ -102,7 +102,7 @@ defmodule GoodAnalytics.MixProject do
 
       # Infrastructure
       {:ecto_evolver, "~> 0.1.0"},
-      {:pgflow, "~> 0.4.0"},
+      {:pgflow, "~> 0.5.0"},
       # Required so PgFlow dashboard modules compile (optional dep of pgflow)
       {:livefilter, "~> 0.2.0"},
 
