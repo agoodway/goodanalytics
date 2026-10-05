@@ -28,7 +28,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 ```elixir
 def deps do
   [
-    {:good_analytics, "~> 0.1.1"}
+    {:good_analytics, "~> 0.1.2"}
   ]
 end
 ```
