@@ -19,6 +19,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 - Elixir 1.18+
 - PostgreSQL 14+
 - An existing Phoenix application with an Ecto repository
+- PgFlow 0.5 (installed as a dependency; its database schema is needed only if your app supervises PgFlow — see [Background flows (PgFlow)](#background-flows-pgflow))
 
 ## Installation
 
@@ -421,6 +422,27 @@ SELECT obj_description('good_analytics.ga_version'::regclass);
 ```
 
 Replace `good_analytics` with your `:schema_prefix` if customized.
+
+### Background flows (PgFlow)
+
+GoodAnalytics depends on `{:pgflow, "~> 0.5.0"}` and defines four flows: `GoodAnalytics.Flows.CreatePartitions`, `GoodAnalytics.Flows.ConnectorPlanning`, `GoodAnalytics.Flows.ConnectorDelivery`, and `GoodAnalytics.Flows.ConnectorReconciliation`. They run only when your application supervises PgFlow and registers them:
+
+```elixir
+{PgFlow,
+ repo: MyApp.Repo,
+ flows: [
+   GoodAnalytics.Flows.CreatePartitions,
+   GoodAnalytics.Flows.ConnectorPlanning,
+   GoodAnalytics.Flows.ConnectorDelivery,
+   GoodAnalytics.Flows.ConnectorReconciliation
+ ]}
+```
+
+Without a running `PgFlow.Supervisor`, partition creation falls back to direct SQL, and connector planning falls back to a supervised local task (it is skipped inside an open transaction).
+
+If your application runs `PgFlow.Supervisor` but has not registered the GoodAnalytics flows, GoodAnalytics still routes partition creation and connector work through PgFlow. Partition creation falls back to direct SQL when `PgFlow.start_flow/2` returns an error. Connector planning falls back to a local task on an error only outside a database transaction; when the call is made inside an open transaction, planning is skipped. A host that runs PgFlow should therefore register all four `GoodAnalytics.Flows.*` modules.
+
+PgFlow 0.5 workers require the PgFlow core schema at version 2 and helpers at version 6; verify with `mix pgflow.check_schema --repo MyApp.Repo`. If your database was set up for an earlier GoodAnalytics build on PgFlow 0.4, stop every PgFlow 0.4 worker first, then run `mix pgflow.setup --upgrade --repo MyApp.Repo` and `mix ecto.migrate` before starting 0.5 workers. There is no mixed-version rolling upgrade.
 
 ### What not to do
 
