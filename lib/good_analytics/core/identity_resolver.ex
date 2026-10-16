@@ -26,6 +26,8 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   import Ecto.Query
 
   @max_attribution_path 50
+  @merged_fields ~w(geo first_partner_id first_referral_link_id first_referral_click_id
+                    last_partner_id last_referral_link_id last_referral_click_id)a
 
   @doc """
   Resolves signals to a visitor. Creates, updates, or merges as needed.
@@ -159,18 +161,22 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   Updates an existing visitor with new signals.
   """
   def update_visitor(visitor, signals) do
+    persist_visitor(visitor, signal_changes(visitor, signals), signals[:geo])
+  end
+
+  defp persist_visitor(visitor, changes, geo) do
     repo = Repo.repo()
 
     with {:ok, updated} <-
            visitor
-           |> Visitor.changeset(signal_changes(visitor, signals))
+           |> Visitor.changeset(changes)
            |> repo.update(prefix: GoodAnalytics.schema_name()) do
       # Geo write is intentionally separate from the changeset path so it can
       # be atomic: `Visitors.maybe_set_geo/2` issues a conditional UPDATE that
       # only succeeds when `geo` is still empty. This holds the first-event-
       # wins contract under concurrent click + beacon writes for the same
       # visitor. The visitor struct we return reflects the post-write state.
-      maybe_apply_geo(updated, signals[:geo])
+      maybe_apply_geo(updated, geo)
     end
   end
 
@@ -208,6 +214,10 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   3. Reassign all events from duplicates to primary
   4. Soft-delete duplicates (status = "merged")
   5. Fire :visitor_merged hook after commit
+
+  Reloads and locks candidates before consolidation. Returns
+  `{:error, :stale_merge_candidates}` if any candidate is missing, already
+  merged, repeated, or belongs to another workspace; callers may resolve again.
   """
   def merge_visitors(primary, duplicates, signals) do
     repo = Repo.repo()
@@ -215,7 +225,11 @@ defmodule GoodAnalytics.Core.IdentityResolver do
 
     multi =
       Ecto.Multi.new()
-      |> Ecto.Multi.run(:merge_signals, fn _repo, _changes ->
+      |> Ecto.Multi.run(:candidates, fn repo, _changes ->
+        lock_merge_candidates(repo, primary, duplicate_ids)
+      end)
+      |> Ecto.Multi.run(:merge_signals, fn _repo, %{candidates: candidates} ->
+        %{primary: primary, duplicates: duplicates} = candidates
         # `pick_geo` runs once over the ORIGINAL set of visitors (not the
         # accumulator) so first-seen-wins is deterministic regardless of
         # reduction order or duplicate count.
@@ -230,8 +244,13 @@ defmodule GoodAnalytics.Core.IdentityResolver do
 
         {:ok, %{merged | geo: merged_geo}}
       end)
-      |> Ecto.Multi.run(:update_primary, fn _repo, %{merge_signals: merged} ->
-        update_visitor(merged, signals)
+      |> Ecto.Multi.run(:update_primary, fn _repo, changes ->
+        %{merge_signals: merged, candidates: %{primary: primary}} = changes
+        # The persisted primary must remain the changeset baseline. Building
+        # a changeset from the in-memory merged struct hides the differences
+        # and returns consolidated values that were never saved to the DB.
+        changes = Map.merge(Map.take(merged, @merged_fields), signal_changes(merged, signals))
+        persist_visitor(primary, changes, signals[:geo])
       end)
       |> Ecto.Multi.update_all(
         :reassign_events,
@@ -270,6 +289,30 @@ defmodule GoodAnalytics.Core.IdentityResolver do
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
+    end
+  end
+
+  defp lock_merge_candidates(repo, primary, duplicate_ids) do
+    ids = [primary.id | duplicate_ids]
+
+    visitors =
+      from(v in Visitor,
+        where: v.id in ^ids and v.workspace_id == ^primary.workspace_id,
+        order_by: v.id,
+        lock: "FOR UPDATE"
+      )
+      |> repo.all(prefix: GoodAnalytics.schema_name())
+
+    if length(visitors) == length(ids) and Enum.all?(visitors, &(&1.status != "merged")) do
+      by_id = Map.new(visitors, &{&1.id, &1})
+
+      {:ok,
+       %{
+         primary: Map.fetch!(by_id, primary.id),
+         duplicates: Enum.map(duplicate_ids, &Map.fetch!(by_id, &1))
+       }}
+    else
+      {:error, :stale_merge_candidates}
     end
   end
 
