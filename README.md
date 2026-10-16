@@ -28,7 +28,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 ```elixir
 def deps do
   [
-    {:good_analytics, "~> 0.1.2"}
+    {:good_analytics, "~> 0.1.3"}
   ]
 end
 ```
@@ -376,6 +376,46 @@ end
 ```
 
 Run it with your normal Ecto workflow (`mix ecto.migrate`, release tasks, CI, etc.). GoodAnalytics schema changes ride alongside your own migrations in `schema_migrations`; only the SQL execution is library-owned.
+
+#### 0.1.3: identity merge persistence and V14 repair
+
+Version 0.1.3 fixes merges that returned consolidated visitor data without
+persisting all of it. Cookie IDs, fingerprints, click IDs, click parameters,
+geographic data, and partner attribution are now saved against the original
+primary record. Consumers continue using the existing resolve/identify APIs.
+
+Existing installations also need a **new host migration** to apply V14; changing
+an already-applied setup migration will not run the repair. Generate the wrapper
+with `mix ecto.gen.migration repair_good_analytics_merge_identifiers` and use:
+
+```elixir
+defmodule MyApp.Repo.Migrations.RepairGoodAnalyticsMergeIdentifiers do
+  use Ecto.Migration
+
+  def up, do: GoodAnalytics.Migration.up(version: 14)
+  def down, do: GoodAnalytics.Migration.down(version: 13)
+end
+```
+
+For a custom analytics schema, pass the same `prefix:` used during installation.
+Keep the wrapper's default transaction enabled. V14 locks `ga_visitors` against
+writes and row-locking reads while it scans existing merge families and repairs
+their survivors; ordinary reads can continue. Schedule the migration to
+accommodate that lock on large databases.
+
+The repair unions `anonymous_ids`, `fingerprints`, and `click_ids` from recorded
+same-workspace merge chains into each surviving visitor. It is idempotent, keeps
+the merged rows, and leaves cycles, missing targets, and cross-workspace links
+untouched. It does not infer new merges from matching emails or identifiers.
+Rolling down retains recovered identifiers because later activity cannot be
+reliably separated from the repaired memberships.
+
+Historical profile/attribution conflicts are not rewritten by V14, and scalar
+`ga_id` values are not converted into additional cookies. The runtime fix
+persists future merges' intended fields; the repair specifically restores the
+three accumulated identifier arrays. Host-owned references to merged visitors
+remain the host application's responsibility. V14 does not replay merge hooks
+or modify host tables.
 
 ### Fresh dev environments
 
