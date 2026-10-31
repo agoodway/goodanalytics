@@ -1,7 +1,7 @@
 defmodule GoodAnalytics.MixProject do
   use Mix.Project
 
-  @version "0.1.3"
+  @version "0.2.0"
   @source_url "https://github.com/agoodway/goodanalytics"
 
   def project do
@@ -71,8 +71,8 @@ defmodule GoodAnalytics.MixProject do
       {:jason, "~> 1.4"},
 
       # Caching
-      {:nebulex, "~> 3.0"},
-      {:nebulex_local, "~> 3.0"},
+      {:nebulex, "~> 3.1"},
+      {:nebulex_local, "~> 3.1"},
       {:decorator, "~> 1.4"},
 
       # UUID
@@ -85,7 +85,7 @@ defmodule GoodAnalytics.MixProject do
       {:cloak_ecto, "~> 1.3"},
 
       # HTTP client (connector delivery)
-      {:req, "~> 0.5"},
+      {:req, "~> 0.7"},
 
       # OpenAPI spec generation
       {:open_api_spex, "~> 3.21"},
@@ -102,13 +102,13 @@ defmodule GoodAnalytics.MixProject do
 
       # Infrastructure
       {:ecto_evolver, "~> 0.1.0"},
-      {:pgflow, "~> 0.5.0"},
+      {:pgflow, "~> 0.7.0"},
       # Required so PgFlow dashboard modules compile (optional dep of pgflow)
       {:livefilter, "~> 0.2.0"},
 
       # Dev/Test
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
-      {:sobelow, "~> 0.15.0", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.18.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.23.0", only: [:dev, :test], runtime: false},
