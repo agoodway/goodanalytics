@@ -19,7 +19,7 @@ defmodule GoodAnalytics.Flows.CreatePartitions do
       mix pgflow.gen.flow_migration GoodAnalytics.Flows.CreatePartitions
       mix ecto.migrate
 
-  Requires PgFlow 0.5 with core schema version 2 and helpers version 6
+  Requires PgFlow 0.7 with core schema version 3 and helpers version 7
   (`mix pgflow.check_schema`).
 
   To trigger manually:

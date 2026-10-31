@@ -19,7 +19,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 - Elixir 1.18+
 - PostgreSQL 14+
 - An existing Phoenix application with an Ecto repository
-- PgFlow 0.5 (installed as a dependency; its database schema is needed only if your app supervises PgFlow — see [Background flows (PgFlow)](#background-flows-pgflow))
+- PgFlow 0.7 (installed as a dependency; its database schema is needed only if your app supervises PgFlow — see [Background flows (PgFlow)](#background-flows-pgflow))
 
 ## Installation
 
@@ -28,7 +28,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 ```elixir
 def deps do
   [
-    {:good_analytics, "~> 0.1.3"}
+    {:good_analytics, "~> 0.2.0"}
   ]
 end
 ```
@@ -465,7 +465,7 @@ Replace `good_analytics` with your `:schema_prefix` if customized.
 
 ### Background flows (PgFlow)
 
-GoodAnalytics depends on `{:pgflow, "~> 0.5.0"}` and defines four flows: `GoodAnalytics.Flows.CreatePartitions`, `GoodAnalytics.Flows.ConnectorPlanning`, `GoodAnalytics.Flows.ConnectorDelivery`, and `GoodAnalytics.Flows.ConnectorReconciliation`. They run only when your application supervises PgFlow and registers them:
+GoodAnalytics depends on `{:pgflow, "~> 0.7.0"}` and defines four flows: `GoodAnalytics.Flows.CreatePartitions`, `GoodAnalytics.Flows.ConnectorPlanning`, `GoodAnalytics.Flows.ConnectorDelivery`, and `GoodAnalytics.Flows.ConnectorReconciliation`. They run only when your application supervises PgFlow and registers them:
 
 ```elixir
 {PgFlow,
@@ -482,7 +482,9 @@ Without a running `PgFlow.Supervisor`, partition creation falls back to direct S
 
 If your application runs `PgFlow.Supervisor` but has not registered the GoodAnalytics flows, GoodAnalytics still routes partition creation and connector work through PgFlow. Partition creation falls back to direct SQL when `PgFlow.start_flow/2` returns an error. Connector planning falls back to a local task on an error only outside a database transaction; when the call is made inside an open transaction, planning is skipped. A host that runs PgFlow should therefore register all four `GoodAnalytics.Flows.*` modules.
 
-PgFlow 0.5 workers require the PgFlow core schema at version 2 and helpers at version 6; verify with `mix pgflow.check_schema --repo MyApp.Repo`. If your database was set up for an earlier GoodAnalytics build on PgFlow 0.4, stop every PgFlow 0.4 worker first, then run `mix pgflow.setup --upgrade --repo MyApp.Repo` and `mix ecto.migrate` before starting 0.5 workers. There is no mixed-version rolling upgrade.
+PgFlow 0.7 workers require the PgFlow core schema at version 3 and helpers at version 7; verify with `mix pgflow.check_schema --repo MyApp.Repo`. On an older schema the workers do not start: `PgFlow.FlowStarter` marks each module failed with `{:schema_incompatible, object}` while your application still boots. For a new installation, follow the PgFlow setup tasks (`mix pgflow.gen.pgmq_migration` when Postgres does not provide pgmq, then `mix pgflow.setup` and `mix ecto.migrate`); the generated wrapper pins core 3 and helpers 7. The GoodAnalytics flow slugs (`ga_create_partitions`, `ga_connector_planning`, `ga_connector_delivery`, `ga_connector_reconciliation`) and their step slugs pass the slug rules that core 3 enforces.
+
+If your application already ran an earlier PgFlow (core 2 with helpers 5 or 6), upgrade its PgFlow schema in one maintenance window before deploying, following PgFlow's [Upgrading to 0.7](https://github.com/agoodway/pgflow/blob/v0.7.0/README.md#upgrading-to-07) and full [upgrade guide](https://github.com/agoodway/pgflow/blob/v0.7.0/docs/UPGRADING_UPSTREAM_2026_10.md). The GoodAnalytics flows need no changes or new migrations for this upgrade.
 
 ### What not to do
 
