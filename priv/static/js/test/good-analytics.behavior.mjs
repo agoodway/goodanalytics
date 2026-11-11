@@ -714,3 +714,92 @@ describe("fingerprint: true self-load", () => {
     assert.equal(ctx.appended[0].src, "https://track.example/ga/js/thumbmark.js");
   });
 });
+
+describe("SPA pageview dedup", () => {
+  function loadSpa(options = {}) {
+    const ctx = loadGoodAnalytics(options);
+    const { window } = ctx;
+    const listeners = {};
+    window.addEventListener = (type, fn) => {
+      (listeners[type] = listeners[type] || []).push(fn);
+    };
+    const move = (url) => {
+      window.location.href = new URL(url, window.location.href).href;
+      window.location.search = new URL(window.location.href).search;
+    };
+    window.history.pushState = (_s, _t, url) => move(url);
+    window.history.replaceState = (_s, _t, url) => move(url);
+    ctx.listeners = listeners;
+    ctx.move = move;
+    ctx.pageviews = () =>
+      ctx.beacons.filter((b) => /"event_type":"pageview"/.test(b.body)).length;
+    return ctx;
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  test("replaceState to the current URL does not record a pageview", async () => {
+    const ctx = loadSpa();
+    ctx.GA.init({ endpoint: "/ga/t", engagement: false });
+    assert.equal(ctx.pageviews(), 1);
+
+    ctx.window.history.replaceState({}, "", ctx.window.location.href);
+    await sleep(300);
+    ctx.window.history.replaceState({}, "", ctx.window.location.href);
+
+    assert.equal(ctx.pageviews(), 1);
+  });
+
+  test("pushState to a new path records one pageview", () => {
+    const ctx = loadSpa();
+    ctx.GA.init({ endpoint: "/ga/t", engagement: false });
+
+    ctx.window.history.pushState({}, "", "/jobs");
+
+    assert.equal(ctx.pageviews(), 2);
+  });
+
+  test("popstate and hashchange to a different URL record one pageview each", () => {
+    const ctx = loadSpa();
+    ctx.GA.init({ endpoint: "/ga/t", engagement: false });
+
+    ctx.move("/a");
+    ctx.listeners.popstate.forEach((fn) => fn());
+    ctx.listeners.popstate.forEach((fn) => fn());
+    assert.equal(ctx.pageviews(), 2);
+
+    ctx.move("/a#section");
+    ctx.listeners.hashchange.forEach((fn) => fn());
+    assert.equal(ctx.pageviews(), 3);
+  });
+
+  test("cleanUrl after init does not record an extra pageview", () => {
+    const ctx = loadSpa({ locationHref: "https://app.example/?via=partner" });
+    ctx.window.location.search = "?via=partner";
+    ctx.GA.init({ endpoint: "/ga/t", engagement: false });
+    assert.equal(ctx.pageviews(), 1);
+
+    ctx.GA.cleanUrl(["via"]);
+
+    assert.equal(ctx.window.location.href, "https://app.example/");
+    assert.equal(ctx.pageviews(), 1);
+  });
+
+  test("a throwing replaceState in cleanUrl does not suppress later pageviews", () => {
+    const ctx = loadSpa({ locationHref: "https://app.example/?via=partner" });
+    ctx.window.location.search = "?via=partner";
+    const move = ctx.window.history.replaceState;
+    let fail = true;
+    ctx.window.history.replaceState = (...args) => {
+      if (fail) throw new Error("SecurityError");
+      return move(...args);
+    };
+    ctx.GA.init({ endpoint: "/ga/t", engagement: false });
+
+    assert.throws(() => ctx.GA.cleanUrl(["via"]), /SecurityError/);
+    fail = false;
+    ctx.window.history.pushState({}, "", "/jobs");
+
+    assert.equal(ctx.pageviews(), 2);
+  });
+});

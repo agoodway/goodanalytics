@@ -1,7 +1,71 @@
 defmodule GoodAnalytics.Core.IdentityResolverTest do
-  use ExUnit.Case, async: true
+  use GoodAnalytics.DataCase, async: true
 
-  alias GoodAnalytics.Core.IdentityResolver
+  alias GoodAnalytics.Core.{IdentityResolver, Visitors}
+  alias GoodAnalytics.Core.Tracking.SourceClassifier
+
+  @workspace_id GoodAnalytics.default_workspace_id()
+
+  describe "last_source" do
+    test "direct does not overwrite a real last_source" do
+      {:ok, visitor} =
+        IdentityResolver.create_visitor(
+          %{source: %{platform: :google, medium: :organic}},
+          @workspace_id
+        )
+
+      {:ok, _} =
+        IdentityResolver.update_visitor(visitor, %{
+          source: %{platform: :direct, medium: :direct}
+        })
+
+      assert %{"platform" => "google"} = last_source(visitor.id)
+    end
+
+    test "an ignored hand-off referer (no source) keeps a real last_source" do
+      {:ok, visitor} =
+        IdentityResolver.create_visitor(
+          %{source: %{platform: :google, medium: :organic}},
+          @workspace_id
+        )
+
+      no_source =
+        SourceClassifier.classify(%{
+          query_params: %{},
+          referer: "https://checkout.stripe.com/pay"
+        })
+
+      {:ok, _} = IdentityResolver.update_visitor(visitor, %{source: no_source})
+
+      assert %{"platform" => "google"} = last_source(visitor.id)
+    end
+
+    test "a new real source replaces last_source" do
+      {:ok, visitor} =
+        IdentityResolver.create_visitor(
+          %{source: %{platform: :google, medium: :organic}},
+          @workspace_id
+        )
+
+      {:ok, _} =
+        IdentityResolver.update_visitor(visitor, %{
+          source: %{platform: :linkedin, medium: :social}
+        })
+
+      assert %{"platform" => "linkedin"} = last_source(visitor.id)
+    end
+
+    test "direct is stored when there is no prior source" do
+      {:ok, visitor} = IdentityResolver.create_visitor(%{}, @workspace_id)
+
+      {:ok, _} =
+        IdentityResolver.update_visitor(visitor, %{
+          source: %{platform: :direct, medium: :direct}
+        })
+
+      assert %{"platform" => "direct"} = last_source(visitor.id)
+    end
+  end
 
   describe "merge_allowed?/2" do
     test "allows merge with strong signal (person_external_id)" do
@@ -55,5 +119,9 @@ defmodule GoodAnalytics.Core.IdentityResolverTest do
       assert function_exported?(IdentityResolver, :merge_visitors, 3)
       assert function_exported?(IdentityResolver, :identify, 2)
     end
+  end
+
+  defp last_source(visitor_id) do
+    Visitors.get_visitor(visitor_id).last_source
   end
 end

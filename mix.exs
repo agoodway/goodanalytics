@@ -1,7 +1,7 @@
 defmodule GoodAnalytics.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/agoodway/goodanalytics"
 
   def project do
@@ -92,6 +92,9 @@ defmodule GoodAnalytics.MixProject do
 
       # User agent parsing
       {:ua_inspector, "~> 3.0"},
+      # YAML parsing for the vendored referrer database (compile and update-task time;
+      # already pulled in by ua_inspector)
+      {:yamerl, "~> 0.10"},
 
       # GeoIP enrichment (optional; only loaded when host app declares :locus
       # and configures `:good_analytics, :geo`). See README for setup.

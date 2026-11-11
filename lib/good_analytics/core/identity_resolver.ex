@@ -16,12 +16,10 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   """
 
   alias GoodAnalytics.Core.Events.Event
-  alias GoodAnalytics.Core.Sessions.Session
+  alias GoodAnalytics.Core.Sessions.{Acquisition, Session}
   alias GoodAnalytics.Core.Visitors
   alias GoodAnalytics.Core.Visitors.Visitor
-  alias GoodAnalytics.Hooks
-  alias GoodAnalytics.Maps
-  alias GoodAnalytics.Repo
+  alias GoodAnalytics.{Hooks, Maps, Repo}
 
   import Ecto.Query
 
@@ -183,7 +181,7 @@ defmodule GoodAnalytics.Core.IdentityResolver do
   defp signal_changes(visitor, signals) do
     %{
       last_seen_at: DateTime.utc_now(),
-      last_source: signals[:source] || visitor.last_source,
+      last_source: next_last_source(visitor.last_source, signals[:source]),
       last_click_id: signals[:click_id] || visitor.last_click_id,
       fingerprints: add_to_array(visitor.fingerprints, signals[:fingerprint]),
       anonymous_ids: add_to_array(visitor.anonymous_ids, signals[:anonymous_id]),
@@ -193,6 +191,20 @@ defmodule GoodAnalytics.Core.IdentityResolver do
         Map.merge(visitor.click_id_params || %{}, signals[:click_id_params] || %{}),
       attribution_path: append_touchpoint(visitor.attribution_path, signals[:source])
     }
+  end
+
+  # last_source is the last non-direct source. A direct source only fills an
+  # empty last_source, so a returning visitor keeps their real acquisition.
+  defp next_last_source(current, nil), do: current
+  defp next_last_source(nil, source), do: source
+
+  defp next_last_source(current, source) do
+    if direct_source?(source), do: current, else: source
+  end
+
+  defp direct_source?(%{} = source) do
+    Acquisition.direct_value?(Maps.get_indifferent(source, :medium)) or
+      Acquisition.direct_value?(Maps.get_indifferent(source, :platform))
   end
 
   defp maybe_apply_geo(visitor, geo) when is_map(geo) and map_size(geo) > 0 do

@@ -1,8 +1,7 @@
 defmodule GoodAnalytics.Core.Sessions.AcquisitionTest do
   use ExUnit.Case, async: true
 
-  alias GoodAnalytics.Core.Sessions.Acquisition
-  alias GoodAnalytics.Core.Sessions.Session
+  alias GoodAnalytics.Core.Sessions.{Acquisition, Session}
 
   defp session(attrs), do: struct(%Session{}, attrs)
 
@@ -18,6 +17,10 @@ defmodule GoodAnalytics.Core.Sessions.AcquisitionTest do
 
     test "true for empty-string signals (normalized to nil)" do
       assert Acquisition.direct?(%{source_platform: "", source_medium: "  "})
+    end
+
+    test "true for the legacy \"nil\" string written by an old recorder bug" do
+      assert Acquisition.direct?(%{source_platform: "nil", source_medium: "nil"})
     end
 
     test "true for direct sentinels when no campaign or click_id is present" do

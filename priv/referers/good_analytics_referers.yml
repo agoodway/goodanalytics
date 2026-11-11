@@ -1,0 +1,342 @@
+# Hand-kept supplement to the vendored referrer database.
+#
+# Same layout as the Snowplow referer-parser `referers.yml` (medium section ->
+# name -> domains), plus:
+#   * an optional `platform:` per entry, pinning the canonical platform key
+#   * a top-level `aliases:` map of alternate spellings -> canonical platform key
+#   * one extra medium, `ignore` (hand-offs that are never an acquisition
+#     source, e.g. a payment provider returning the visitor)
+#
+# This file wins over Snowplow and Matomo on any host conflict. Only add what
+# neither upstream list has, with a comment saying why. Never add sites that are
+# specific to one industry or customer; unlisted sites are correctly "Referral".
+# After editing, run `mix good_analytics.referers.update`.
+
+aliases:
+  # Alternate spellings and legacy keys -> one canonical platform key.
+  meta: facebook # fbclid classifies as meta; Facebook is the product
+  x: twitter
+  # Old raw utm_source shorthands marketers use; canonicalise like the full name.
+  fb: facebook
+  ig: instagram
+  li: linkedin
+  duckai: duck_ai
+  perplexity_ai: perplexity
+  claude_ai: claude
+  google_jobs_apply: google_jobs
+  # List names whose slug differs from the key this library has always emitted.
+  microsoft_copilot: copilot
+  google_gemini: gemini
+  mistral_ai: mistral
+  # Legacy platform keys this library emitted before it used the vendored lists
+  # (historical rows keep these values), and keys the lists spell differently.
+  outlook_com: outlook
+  proton: proton_mail
+  yandex_mail: yandex
+  mailru: mail_ru
+  zoho_mail: zoho
+
+email:
+  # ISP and regional webmail. Neither upstream list has these, and they send a
+  # referrer on click.
+  CenturyLink Mail:
+    domains:
+      - centurylink.net
+  Spectrum Mail:
+    domains:
+      - spectrum.net
+  EarthLink Mail:
+    domains:
+      - earthlink.net
+  EveryMail:
+    domains:
+      - everymail.com
+  Aruba Mail:
+    domains:
+      - aruba.it
+  Comcast Mail:
+    domains:
+      - comcast.net
+  AT&T Mail:
+    # slug would be at_t_mail, so the key is pinned
+    platform: att_mail
+    domains:
+      - att.net
+  Verizon Mail:
+    domains:
+      - verizon.net
+  Cox Mail:
+    domains:
+      - cox.net
+  WEB.DE / GMX:
+    # 1&1's webmail link de-referrer, and the WEB.DE web client
+    platform: web_de
+    domains:
+      - ui-deref.de
+      - mail.web.de
+  GMX:
+    # GMX web client; missing from both upstream lists
+    platform: gmx
+    domains:
+      - mail.gmx.com
+      - mail.gmx.net
+      - mail.gmx.de
+  Outlook:
+    # Microsoft 365 / Outlook web hosts the upstream lists lack (they only list
+    # outlook.live.com as "Outlook.com", which aliases to the same platform)
+    platform: outlook
+    domains:
+      - outlook.com
+      - outlook.office.com
+      - outlook.office365.com
+  Gmail:
+    # Gmail's image/link proxy
+    domains:
+      - mail.googleusercontent.com
+  iCloud Mail:
+    # Old map had it; neither upstream list has the web client host
+    platform: icloud_mail
+    domains:
+      - mail.icloud.com
+  Fastmail:
+    # Web client host; neither upstream list has it
+    domains:
+      - app.fastmail.com
+  Tuta:
+    # Web client host; neither upstream list has it
+    domains:
+      - mail.tutanota.com
+  HEY:
+    # Web client host; neither upstream list has it
+    domains:
+      - app.hey.com
+  MailerSend:
+    # ESP click-tracking host; the parent walk covers per-account subdomains
+    domains:
+      - click.mailersend.net
+
+social:
+  Microsoft Teams:
+    # Teams link opens; not in either upstream list. Social, like WhatsApp,
+    # Slack and Telegram (GA4 has no messaging channel).
+    platform: microsoft_teams
+    domains:
+      - statics.teams.cdn.office.net
+      - teams.microsoft.com
+  Facebook:
+    # Facebook's short domain
+    domains:
+      - fb.com
+  YouTube:
+    # Display name only (the lists spell it "Youtube"); hosts come from upstream.
+    platform: youtube
+    domains: []
+  Slack:
+    # Slack's marketing/web host; the lists only have the app host and package
+    domains:
+      - slack.com
+  X (Twitter):
+    # Display name and canonical key for the twitter/x rebrand. Matomo already
+    # lists x.com (as Twitter), so this entry only supplies the name.
+    platform: twitter
+    domains: []
+
+search:
+  AT&T Search:
+    # AT&T's search portal; att.net itself is webmail (see Mail above)
+    platform: att_search
+    domains:
+      - start.att.net
+  Norton Safe Search:
+    # Browser-extension search; not in either upstream list
+    domains:
+      - search.nortonsafesearch.com
+  Google for Jobs:
+    # Source name only (no host): Google's job-search apply flow, reported as
+    # utm_source=google_jobs_apply
+    platform: google_jobs
+    domains: []
+
+chatbot:
+  Perplexity:
+    # Display name only (the lists spell it "Perplexity.ai"); hosts come from upstream.
+    platform: perplexity
+    domains: []
+  # AI assistant hosts this library has always recognised that neither upstream
+  # list has (or that they file under another medium). Kept so coverage is not
+  # dropped.
+  Microsoft Copilot:
+    # Seen as utm_source=copilot.com and as a referrer. edgeservices.bing.com is
+    # Copilot in Edge, not Bing search.
+    platform: copilot
+    domains:
+      - copilot.com
+      - edgeservices.bing.com
+      - turing.microsoft.com
+      - cosmos.microsoft.com
+  ChatGPT:
+    # chat-gpt.org is a Matomo "Chat+" entry; pinned to ChatGPT as before
+    domains:
+      - openai.com
+      - chat-gpt.org
+  Claude.ai:
+    domains:
+      - anthropic.com
+  Google Gemini:
+    domains:
+      - deepmind.com
+  Grok:
+    domains:
+      - grok.x.com
+      - x.ai
+  DeepSeek:
+    domains:
+      - deepseek.com
+  Mistral.ai:
+    domains:
+      - mistral.ai
+  Hugging Face:
+    platform: huggingchat
+    domains:
+      - huggingface.co
+      - huggingchat.com
+  Phind:
+    domains:
+      - phind.com
+  Pi:
+    domains:
+      - pi.ai
+  Zhipu AI:
+    # chatglm.cn is a Matomo "ChatGLM" entry; Zhipu makes ChatGLM
+    platform: zhipu
+    domains:
+      - zhipu.ai
+      - chatglm.cn
+  Qwen:
+    domains:
+      - qwenlm.ai
+  Felo:
+    domains:
+      - felo.ai
+  Komo:
+    domains:
+      - komo.ai
+  Sider:
+    domains:
+      - sider.ai
+  Venice:
+    domains:
+      - venice.ai
+  Cohere:
+    domains:
+      - cohere.ai
+  Jasper:
+    domains:
+      - jasper.ai
+  Writesonic:
+    domains:
+      - writesonic.com
+  QuillBot:
+    domains:
+      - quillbot.com
+  Wordtune:
+    domains:
+      - wordtune.com
+  Copy.ai:
+    platform: copyai
+    domains:
+      - copy.ai
+  Blackbox:
+    domains:
+      - blackbox.ai
+  OpenChat:
+    domains:
+      - openchat.so
+  Open Assistant:
+    domains:
+      - open-assistant.io
+  OpenRouter:
+    domains:
+      - openrouter.ai
+  LMArena:
+    domains:
+      - lmarena.ai
+  Coze:
+    domains:
+      - coze.com
+  Exa:
+    domains:
+      - exa.ai
+  Forefront:
+    domains:
+      - forefront.ai
+  Reka:
+    domains:
+      - reka.ai
+  AI21:
+    domains:
+      - ai21.com
+  DeepL:
+    domains:
+      - deepl.com
+  Suno:
+    domains:
+      - chat.suno.com
+  Neeva:
+    domains:
+      - neeva.com
+  Nimble:
+    domains:
+      - nimble.ai
+  BNNGPT:
+    domains:
+      - bnngpt.com
+  Adobe Firefly:
+    domains:
+      - firefly.adobe.com
+
+  You.com:
+    # AI assistant / search hybrid. Snowplow files it under search; pinned to AI
+    # as this library has always done.
+    platform: you
+    domains:
+      - you.com
+
+unknown:
+  # Product, account and app hosts of search/social companies. Without these the
+  # parent walk widens them into the parent's medium (docs.google.com would
+  # become Organic Search via google.com). Known site, medium not a source.
+  Google:
+    domains:
+      - docs.google.com
+      - classroom.google.com
+      - play.google.com
+      - calendar.google.com
+      - meet.google.com
+  Yahoo!:
+    # Sign-in page, not a search referral
+    domains:
+      - login.yahoo.com
+
+ignore:
+  # Hand-offs that are never an acquisition source. They classify to no source,
+  # exactly like internal navigation.
+  Stripe Checkout:
+    domains:
+      - checkout.stripe.com
+      - billing.stripe.com
+  PayPal:
+    domains:
+      - paypal.com
+  Google Accounts:
+    # Sign-in redirect (overrides Snowplow's "unknown" entry). The wildcard
+    # stops accounts.google.<tld> being widened into Google search.
+    domains:
+      - accounts.google.com
+      - accounts.google.{}
+  Apple ID:
+    domains:
+      - appleid.apple.com
+  Microsoft Sign-in:
+    domains:
+      - login.microsoftonline.com

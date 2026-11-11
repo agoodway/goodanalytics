@@ -112,6 +112,26 @@ defmodule GoodAnalytics.Core.AnalyticsTimeseriesTest do
       assert Enum.at(buckets, 0).value == 1
     end
 
+    test "source_medium direct matches no medium; ilike stays a plain column match" do
+      base = t0()
+      v = create_visitor!()
+      seed_event!(v, "pageview", DateTime.add(base, 10, :minute), %{source_medium: nil})
+      seed_event!(v, "pageview", DateTime.add(base, 20, :minute), %{source_medium: "direct"})
+      seed_event!(v, "pageview", DateTime.add(base, 30, :minute), %{source_medium: "organic"})
+
+      total = fn filter ->
+        opts()
+        |> Keyword.put(:filters, [filter])
+        |> then(&Analytics.timeseries(@ws, :pageviews, &1))
+        |> Enum.map(& &1.value)
+        |> Enum.sum()
+      end
+
+      assert total.({:source_medium, :in, ["direct"]}) == 2
+      assert total.({:source_medium, :neq, "organic"}) == 2
+      assert total.({:source_medium, :ilike, "dir"}) == 1
+    end
+
     test "a bare {field, value} filter is treated as :eq (legacy contract)" do
       base = t0()
       v = create_visitor!()

@@ -77,14 +77,14 @@ defmodule GoodAnalytics.Core.Events.DeviceBackfillTest do
     end
 
     test "marks browser-only parsed user_agent rows with terminal unknown device_type" do
-      event = insert_legacy_event!(%{user_agent: "curl/8.0.1"})
+      event = insert_legacy_event!(%{user_agent: "Faraday v2.7.0"})
 
       assert {:updated, 1, _cursor} = DeviceBackfill.run_batch(batch_size: 100)
 
       reloaded = Events.get_by_id(event.id)
       assert reloaded.device_type == "unknown"
-      assert reloaded.browser == "curl"
-      assert reloaded.browser_version == "8.0.1"
+      assert reloaded.browser == "Faraday"
+      assert reloaded.browser_version == "2.7.0"
       assert {:done, 0} = DeviceBackfill.run_batch(batch_size: 100)
     end
 

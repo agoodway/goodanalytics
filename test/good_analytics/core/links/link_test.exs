@@ -27,6 +27,19 @@ defmodule GoodAnalytics.Core.Links.LinkTest do
       assert %{workspace_id: ["can't be blank"]} = errors
     end
 
+    test "rejects destinations with a backslash or userinfo" do
+      for url <- ["https://other.example\\@site.test/", "https://user@site.test/"] do
+        changeset = Link.changeset(%Link{}, %{@valid_attrs | url: url})
+        refute changeset.valid?
+        assert Map.has_key?(errors_on(changeset), :url)
+      end
+    end
+
+    test "accepts a normal destination with a port and query" do
+      changeset = Link.changeset(%Link{}, %{@valid_attrs | url: "https://site.test:8443/a?b=c"})
+      assert changeset.valid?
+    end
+
     test "invalid link_type" do
       attrs = Map.put(@valid_attrs, :link_type, "invalid")
       changeset = Link.changeset(%Link{}, attrs)
@@ -178,6 +191,20 @@ defmodule GoodAnalytics.Core.Links.LinkTest do
     test "rejects URLs without a host" do
       refute Link.valid_http_url?("https://")
       refute Link.valid_http_url?("http:/no-host")
+    end
+
+    test "rejects backslashes, which browsers treat as slashes" do
+      refute Link.valid_http_url?("https://other.example\\@site.test/")
+      refute Link.valid_http_url?("https://site.test/a\\b")
+    end
+
+    test "rejects userinfo" do
+      refute Link.valid_http_url?("https://user@site.test/")
+      refute Link.valid_http_url?("https://user:pass@site.test/")
+    end
+
+    test "accepts an @ in the query string" do
+      assert Link.valid_http_url?("https://site.test:8443/a?b=c@d")
     end
 
     test "rejects non-binary input" do

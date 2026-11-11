@@ -56,7 +56,7 @@ defmodule GoodAnalytics.Core.Tracking.Plug do
   end
 
   defp classify_source(conn) do
-    source = SourceClassifier.classify(conn)
+    source = SourceClassifier.classify(conn, page_host: conn.host)
     Plug.Conn.assign(conn, :ga_source, source)
   end
 

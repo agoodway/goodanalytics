@@ -27,18 +27,18 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   """
 
   alias GoodAnalytics.Core.Events.Recorder
-  alias GoodAnalytics.Core.IdentityResolver
-  alias GoodAnalytics.Core.Links
+  alias GoodAnalytics.Core.{IdentityResolver, Links, Partners}
   alias GoodAnalytics.Core.Links.Link
-  alias GoodAnalytics.Core.Partners
   alias GoodAnalytics.Core.Partners.Attribution
   alias GoodAnalytics.Core.Tracking.{Deduplication, SourceClassifier}
-  alias GoodAnalytics.Geo
-  alias GoodAnalytics.Hooks
+  alias GoodAnalytics.Core.Visitors.Visitor
+  alias GoodAnalytics.{Geo, Hooks, Text}
 
   import Plug.Conn
 
   require Logger
+
+  @link_utm_fields ~w(utm_source utm_medium utm_campaign utm_content utm_term)a
 
   @doc """
   Handles a redirect for the given domain and key.
@@ -51,7 +51,11 @@ defmodule GoodAnalytics.Core.Links.Redirect do
          {:ok, destination} <- validate_destination_url(link, conn) do
       click_id = Uniq.UUID.uuid7()
       ga_id = conn.cookies["_ga_good"] || click_id
-      source = SourceClassifier.classify(conn)
+      query_params = Map.merge(link_utm_params(link), conn.query_params)
+
+      source =
+        SourceClassifier.classify(%{conn | query_params: query_params}, page_host: conn.host)
+
       qr = conn.query_params["qr"] == "1"
 
       geo_map = lookup_geo(conn.remote_ip)
@@ -65,7 +69,15 @@ defmodule GoodAnalytics.Core.Links.Redirect do
 
       record_click_if_unique(conn, link, visitor, click_id, source, qr, referral_context)
 
-      final_destination = build_redirect_url(destination, link, conn, click_id, geo_map)
+      final_destination =
+        build_redirect_url(
+          destination,
+          link,
+          conn,
+          click_id,
+          geo_map,
+          visitor_ga_id(visitor, ga_id)
+        )
 
       hook_event = %{
         link: link,
@@ -160,6 +172,9 @@ defmodule GoodAnalytics.Core.Links.Redirect do
     end
   end
 
+  defp visitor_ga_id(%Visitor{ga_id: ga_id}, _fallback) when is_binary(ga_id), do: ga_id
+  defp visitor_ga_id(_visitor, fallback), do: fallback
+
   defp record_click_if_unique(conn, link, visitor, click_id, source, qr, referral_context) do
     case Deduplication.check(conn, link) do
       {:ok, true} ->
@@ -219,34 +234,50 @@ defmodule GoodAnalytics.Core.Links.Redirect do
   - Request passthrough overrides link UTMs (per-click override > per-link default)
   - `ga_id` is always present
 
+  The `ga_id` value depends on who owns the final destination. `visitor_ga_id` is
+  the resolved visitor's persistent `ga_id`. It is handed off only when the
+  destination host is owned: the short-link host (`conn.host`), the link's
+  `domain`, or an entry in the `:internal_hosts` config (read at call time). The
+  landing-page tracker adopts `?ga_id` as its identity and identity resolution
+  matches it against `visitors.ga_id` only, so this keeps a returning visitor on
+  one identity. For any other destination (or when `visitor_ga_id` is nil) the
+  per-click `click_id` is appended instead, so a stable cross-site identifier
+  never reaches third-party sites. List your own site domains in
+  `:internal_hosts` so identity carries across them.
+
   When `geo_map` is provided AND the workspace has geo routing enabled via the
   host-app `:geo_routing_enabled_fn` callback AND `link.geo_targeting` maps the
   resolved country code to a non-empty URL, that URL replaces the device-
   targeted/default destination before params are merged.
   """
-  def build_redirect_url(base_url, link, conn, click_id, geo_map \\ nil) do
+  def build_redirect_url(base_url, link, conn, click_id, geo_map \\ nil, visitor_ga_id \\ nil) do
     base_url = maybe_geo_route(base_url, link, geo_map)
 
     uri = URI.parse(base_url)
     existing_params = URI.decode_query(uri.query || "")
 
-    link_utms =
-      %{}
-      |> maybe_put("utm_source", link.utm_source)
-      |> maybe_put("utm_medium", link.utm_medium)
-      |> maybe_put("utm_campaign", link.utm_campaign)
-      |> maybe_put("utm_content", link.utm_content)
-      |> maybe_put("utm_term", link.utm_term)
-
+    link_utms = link_utm_params(link)
     passthrough = passthrough_params(conn.query_params)
 
     params =
       existing_params
       |> Map.merge(link_utms)
       |> Map.merge(passthrough)
-      |> Map.put("ga_id", click_id)
+      |> Map.put("ga_id", handoff_ga_id(base_url, link, conn, click_id, visitor_ga_id))
 
     %{uri | query: URI.encode_query(params)} |> URI.to_string()
+  end
+
+  defp handoff_ga_id(_base_url, _link, _conn, click_id, nil), do: click_id
+
+  defp handoff_ga_id(base_url, link, conn, click_id, visitor_ga_id) do
+    if SourceClassifier.same_site?(base_url, owned_hosts(link, conn)),
+      do: visitor_ga_id,
+      else: click_id
+  end
+
+  defp owned_hosts(link, conn) do
+    [conn.host, link.domain | SourceClassifier.internal_hosts()]
   end
 
   defp maybe_geo_route(base_url, _link, nil), do: base_url
@@ -320,8 +351,14 @@ defmodule GoodAnalytics.Core.Links.Redirect do
     |> Map.new()
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  # The link's non-blank utm_* fields, keyed by param name.
+  defp link_utm_params(link) do
+    for field <- @link_utm_fields,
+        value = Text.blank_to_nil(Map.get(link, field)),
+        is_binary(value),
+        into: %{},
+        do: {Atom.to_string(field), value}
+  end
 
   defp apply_hook_cookies(conn, hook_results) do
     Enum.reduce(hook_results, conn, fn

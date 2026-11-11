@@ -24,8 +24,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   alias GoodAnalytics.Connectors.Signals
   alias GoodAnalytics.Core.{Events.Event, Events.Recorder, IdentityResolver, Links, Partners}
   alias GoodAnalytics.Core.Partners.Attribution
-  alias GoodAnalytics.Core.Tracking.ReferralCookie
-  alias GoodAnalytics.Core.Tracking.SourceClassifier
+  alias GoodAnalytics.Core.Tracking.{ReferralCookie, SourceClassifier}
   alias GoodAnalytics.Core.Visitors.Visitor
   alias GoodAnalytics.Geo
   @uuid_regex ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
@@ -109,7 +108,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
               event_id: validate_event_id(Map.get(params, "event_id")),
               fingerprint: validate_fingerprint(Map.get(params, "fingerprint")),
               ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
-              user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
+              user_agent: request_user_agent(conn),
               connector_signals: connector_signals
             }
             |> Map.merge(referral_attrs)
@@ -124,6 +123,9 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
         json(conn, %{status: "ok"})
     end
   end
+
+  defp request_user_agent(conn),
+    do: conn |> Plug.Conn.get_req_header("user-agent") |> List.first()
 
   defp handle_engagement_event(conn, params, workspace_id, source) do
     conn
@@ -141,6 +143,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
           url: sanitize_url(Map.get(params, "url")),
           properties: sanitize_properties(Map.get(params, "properties", %{})),
           anonymous_id: resolve_anonymous_id(conn, params),
+          user_agent: request_user_agent(conn),
           engaged_ms: validate_engaged_ms(Map.get(params, "engaged_ms")),
           scroll_depth: validate_scroll_depth(Map.get(params, "scroll_depth"))
         }
@@ -218,7 +221,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
             click_id: click_id,
             source: source,
             ip_address: conn.remote_ip |> :inet.ntoa() |> to_string(),
-            user_agent: Plug.Conn.get_req_header(conn, "user-agent") |> List.first(),
+            user_agent: request_user_agent(conn),
             url: sanitize_url(Map.get(params, "url")),
             referrer: sanitize_url(Map.get(params, "referrer"))
           }
@@ -276,26 +279,11 @@ defmodule GoodAnalytics.Core.Tracking.BeaconController do
   # (Astro, PHP, core-direct) and any CDN/edge rewrite that re-originates the
   # request. A missing url/referrer degrades to :direct rather than self-referring.
   defp ga_source(conn, params) do
-    conn.assigns[:ga_source] || SourceClassifier.classify(beacon_signal(params))
-  end
-
-  defp beacon_signal(params) do
-    %{
-      query_params: url_query_params(Map.get(params, "url")),
-      referer: Map.get(params, "referrer")
-    }
-  end
-
-  defp url_query_params(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{query: query} when is_binary(query) -> URI.decode_query(query)
-      _uri -> %{}
+    case Map.fetch(conn.assigns, :ga_source) do
+      {:ok, source} -> source
+      :error -> SourceClassifier.classify_beacon(params)
     end
-  rescue
-    URI.Error -> %{}
   end
-
-  defp url_query_params(_url), do: %{}
 
   defp build_referral_context(%{link_type: "referral", partner_id: pid} = link, click_id)
        when is_binary(pid) do

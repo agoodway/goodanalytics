@@ -13,15 +13,9 @@ defmodule GoodAnalytics.Core.Events.Recorder do
   """
 
   alias GoodAnalytics.Connectors.{PostCommit, Signals}
-  alias GoodAnalytics.Core.Events.Event
-  alias GoodAnalytics.Core.Events.UrlNormalizer
-  alias GoodAnalytics.Core.Sessions
-  alias GoodAnalytics.Core.Visitors
-  alias GoodAnalytics.Devices
-  alias GoodAnalytics.Hooks
-  alias GoodAnalytics.Maps
-  alias GoodAnalytics.PubSub
-  alias GoodAnalytics.Repo
+  alias GoodAnalytics.Core.Events.{Event, UrlNormalizer}
+  alias GoodAnalytics.Core.{Sessions, Visitors}
+  alias GoodAnalytics.{Devices, Hooks, Maps, PubSub, Repo}
 
   import Ecto.Query
 
@@ -83,8 +77,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         )
       end
 
-    raw_ua = Map.get(attrs, :user_agent) || Map.get(attrs, "user_agent")
-    device = Devices.parse(raw_ua)
+    {device, ua_attrs} = ua_attrs(attrs)
 
     event_attrs =
       attrs
@@ -95,7 +88,6 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         event_type: event_type,
         event_name: event_name,
         url: raw_url,
-        user_agent: raw_ua,
         host: UrlNormalizer.host(raw_url),
         path: UrlNormalizer.path(raw_url),
         source_platform: get_in_source(attrs, :platform),
@@ -103,7 +95,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
         source_campaign: get_in_source(attrs, :campaign),
         connector_source_context: connector_source_context
       })
-      |> Map.merge(Devices.to_event_attrs(device))
+      |> Map.merge(ua_attrs)
 
     changeset =
       Event.changeset(
@@ -203,6 +195,7 @@ defmodule GoodAnalytics.Core.Events.Recorder do
 
   defp get_from_source_map(_source, _key), do: nil
 
+  defp normalize_source_value(nil), do: nil
   defp normalize_source_value(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_source_value(value), do: value
 
@@ -303,20 +296,31 @@ defmodule GoodAnalytics.Core.Events.Recorder do
       engagement_properties(attrs)
 
     raw_url = Map.get(attrs, :url) || Map.get(attrs, "url")
+    {_device, ua_attrs} = ua_attrs(attrs)
 
-    event_attrs = %{
-      workspace_id: visitor.workspace_id,
-      visitor_id: visitor.id,
-      session_id: session_id,
-      event_type: "engagement",
-      url: raw_url,
-      host: UrlNormalizer.host(raw_url),
-      path: UrlNormalizer.path(raw_url),
-      properties: properties
-    }
+    event_attrs =
+      %{
+        workspace_id: visitor.workspace_id,
+        visitor_id: visitor.id,
+        session_id: session_id,
+        event_type: "engagement",
+        url: raw_url,
+        host: UrlNormalizer.host(raw_url),
+        path: UrlNormalizer.path(raw_url),
+        properties: properties
+      }
+      |> Map.merge(ua_attrs)
 
     %Event{id: Uniq.UUID.uuid7(), inserted_at: ts}
     |> Event.changeset(event_attrs)
+  end
+
+  # The raw user agent plus the device columns parsed from it, with the parsed
+  # device map for visitor enrichment.
+  defp ua_attrs(attrs) do
+    raw_ua = Maps.get_indifferent(attrs, :user_agent)
+    device = Devices.parse(raw_ua)
+    {device, Map.put(Devices.to_event_attrs(device), :user_agent, raw_ua)}
   end
 
   defp engagement_properties(attrs) do

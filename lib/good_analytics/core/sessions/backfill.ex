@@ -212,18 +212,24 @@ defmodule GoodAnalytics.Core.Sessions.Backfill do
   defp maybe_since(query, nil), do: query
   defp maybe_since(query, %DateTime{} = since), do: where(query, [e], e.inserted_at >= ^since)
 
+  # Acquisition fields go through the same normalization as live sessions, so a
+  # legacy "nil" string on an old event is never copied into a session.
   defp event_attrs(%Event{} = event) do
-    %{
+    acquisition =
+      Acquisition.to_session_acquisition(%{
+        source_platform: event.source_platform,
+        source_medium: event.source_medium,
+        source_campaign: event.source_campaign,
+        click_id: event.click_id
+      })
+
+    Map.merge(acquisition, %{
       url: event.url,
       path: event.path,
-      source_platform: event.source_platform,
-      source_medium: event.source_medium,
-      source_campaign: event.source_campaign,
-      click_id: event.click_id,
       device_type: event.device_type,
       browser: event.browser,
       os: event.os
-    }
+    })
   end
 
   defp normalize_opts(opts) do

@@ -2,8 +2,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
   use GoodAnalytics.DataCase, async: false
 
   alias GoodAnalytics.Core.Events.Event
-  alias GoodAnalytics.Core.IdentityResolver
-  alias GoodAnalytics.Core.Sessions
+  alias GoodAnalytics.Core.{IdentityResolver, Sessions}
   alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Tracking.BeaconController
   alias GoodAnalytics.Core.Tracking.Router, as: TrackingRouter
@@ -18,6 +17,12 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
     |> Plug.Conn.put_req_header("user-agent", "BeaconControllerTest/1.0")
     |> Plug.Conn.assign(:ga_source, nil)
     |> Plug.Conn.put_private(:phoenix_format, "json")
+  end
+
+  # No upstream filter ran, so the beacon classifies the source itself.
+  defp build_unclassified_event_conn do
+    conn = build_event_conn()
+    %{conn | assigns: Map.delete(conn.assigns, :ga_source)}
   end
 
   defp build_event_conn_with_cookie(cookie_value) do
@@ -151,6 +156,33 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
       assert session.engaged_seconds == 12
     end
 
+    test "engagement beacon from a bot user agent carries bot_name" do
+      visitor = create_visitor!(%{anonymous_ids: ["anon-engagement-bot"]})
+
+      {:ok, _} =
+        Sessions.sessionize(
+          %{workspace_id: GoodAnalytics.default_workspace_id(), visitor_id: visitor.id},
+          "pageview",
+          %{path: "/pricing", __ts__: utc_now()}
+        )
+
+      conn =
+        build_event_conn()
+        |> Plug.Conn.put_req_header("user-agent", "Mozilla/5.0 (compatible; GPTBot/1.1)")
+
+      BeaconController.event(conn, %{
+        "event_type" => "engagement",
+        "anonymous_id" => "anon-engagement-bot",
+        "url" => "https://example.com/pricing",
+        "engaged_ms" => 4_000
+      })
+
+      event = latest_event()
+      assert event.event_type == "engagement"
+      assert event.device_type == "bot"
+      assert event.bot_name == "GPTBot"
+    end
+
     test "drops engagement for unknown visitors without creating identity or event rows" do
       before_visitors =
         GoodAnalytics.TestRepo.aggregate(Visitor, :count, :id, prefix: "good_analytics")
@@ -258,7 +290,7 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
     # the page itself to prove classification reads the body, not the envelope.
     test "classifies from the JS body referrer, not the request Referer header" do
       conn =
-        build_event_conn()
+        build_unclassified_event_conn()
         |> Plug.Conn.put_req_header("referer", "https://site.test/jobs")
         |> BeaconController.event(%{
           "event_type" => "pageview",
@@ -276,12 +308,12 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
 
     test "an empty body referrer is direct, even when the header referer is the page" do
       conn =
-        build_event_conn()
-        |> Plug.Conn.put_req_header("referer", "https://www.jobsinappraisal.com/jobs/x")
+        build_unclassified_event_conn()
+        |> Plug.Conn.put_req_header("referer", "https://www.site.test/jobs/x")
         |> BeaconController.event(%{
           "event_type" => "pageview",
           "anonymous_id" => "anon-direct-#{System.unique_integer([:positive])}",
-          "url" => "https://www.jobsinappraisal.com/jobs/x",
+          "url" => "https://www.site.test/jobs/x",
           "referrer" => ""
         })
 
@@ -289,9 +321,44 @@ defmodule GoodAnalytics.Core.Tracking.BeaconControllerTest do
       assert latest_event().source_medium == "direct"
     end
 
-    test "classifies UTM params from the JS body url query string" do
+    test "a same-site referrer (www vs apex) is internal navigation, not a source" do
+      conn =
+        build_unclassified_event_conn()
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-internal-#{System.unique_integer([:positive])}",
+          "url" => "https://www.site.test/jobs/1",
+          "referrer" => "https://site.test/"
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.source_medium == nil
+      assert event.source_platform == nil
+      assert event.source_campaign == nil
+    end
+
+    test "an upstream-assigned nil ga_source is respected, not re-classified" do
       conn =
         build_event_conn()
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-upstream-nil-#{System.unique_integer([:positive])}",
+          "url" => "https://site.test/landing",
+          "referrer" => "https://chatgpt.com/"
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event = latest_event()
+      assert event.source_medium == nil
+      assert event.source_platform == nil
+    end
+
+    test "classifies UTM params from the JS body url query string" do
+      conn =
+        build_unclassified_event_conn()
         |> Plug.Conn.put_req_header("referer", "https://site.test/landing")
         |> BeaconController.event(%{
           "event_type" => "pageview",

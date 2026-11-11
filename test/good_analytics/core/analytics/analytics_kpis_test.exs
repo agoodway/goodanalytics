@@ -63,6 +63,24 @@ defmodule GoodAnalytics.Core.AnalyticsKpisTest do
       assert_in_delta kpis.bounce_rate, 0.0, 0.0001
     end
 
+    test "a direct source_medium filter includes sessions stored with a NULL medium" do
+      insert_session!(%{source_medium: nil, is_bounce: false, is_engaged: true})
+      insert_session!(%{source_medium: "direct", is_bounce: false, is_engaged: true})
+      insert_session!(%{source_medium: "organic", is_bounce: true, is_engaged: false})
+
+      kpis =
+        Analytics.kpis(@ws,
+          window: window(),
+          filters: [{:source_medium, :in, ["direct", "none"]}]
+        )
+
+      assert kpis.sessions == 2
+      assert_in_delta kpis.engaged_rate, 1.0, 0.0001
+
+      kpis = Analytics.kpis(@ws, window: window(), filters: [{:source_medium, :neq, "organic"}])
+      assert kpis.sessions == 2
+    end
+
     test "computes visitors, new_visitors, pageviews, and revenue for the window" do
       v1 = create_visitor!(%{first_seen_at: ~U[2026-06-10 00:00:00.000000Z]})
       v2 = create_visitor!(%{first_seen_at: ~U[2026-05-01 00:00:00.000000Z]})

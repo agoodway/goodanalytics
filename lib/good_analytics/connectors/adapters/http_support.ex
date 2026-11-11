@@ -62,9 +62,5 @@ defmodule GoodAnalytics.Connectors.Adapters.HTTPSupport do
   Shared by adapters that resolve a conversion identifier from either mapping
   config or connector credentials, treating whitespace-only values as absent.
   """
-  def blank_to_nil(value) when is_binary(value) do
-    if String.trim(value) == "", do: nil, else: value
-  end
-
-  def blank_to_nil(value), do: value
+  defdelegate blank_to_nil(value), to: GoodAnalytics.Text
 end

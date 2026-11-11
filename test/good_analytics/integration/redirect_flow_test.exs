@@ -7,9 +7,9 @@ defmodule GoodAnalytics.Integration.RedirectFlowTest do
   """
   use GoodAnalytics.DataCase, async: false
 
-  alias GoodAnalytics.Core.Links
+  alias GoodAnalytics.Core.{Links, Visitors}
   alias GoodAnalytics.Core.Links.Redirect
-  alias GoodAnalytics.Core.Visitors
+  alias GoodAnalytics.Core.Tracking.BeaconController
 
   import Plug.Test
 
@@ -36,6 +36,22 @@ defmodule GoodAnalytics.Integration.RedirectFlowTest do
     Map.fetch!(params, "ga_id")
   end
 
+  defp returning_conn(link, ga_id) do
+    build_redirect_conn("/#{link.key}")
+    |> Plug.Conn.put_req_header("cookie", "_ga_good=#{ga_id}")
+  end
+
+  defp put_internal_hosts(hosts) do
+    previous = Application.get_env(:good_analytics, :internal_hosts)
+    Application.put_env(:good_analytics, :internal_hosts, hosts)
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:good_analytics, :internal_hosts, previous),
+        else: Application.delete_env(:good_analytics, :internal_hosts)
+    end)
+  end
+
   describe "full redirect flow" do
     test "redirect creates click event, visitor, and appends ga_id to URL" do
       link = create_link!(%{domain: "test.link", url: "https://destination.com/page"})
@@ -60,6 +76,165 @@ defmodule GoodAnalytics.Integration.RedirectFlowTest do
       # Visitor should exist
       assert visitor = Visitors.get_visitor(click.visitor_id)
       assert visitor.workspace_id == @workspace_id
+    end
+
+    test "a click referred from the short-link host itself records no source" do
+      link = create_link!(%{domain: "test.link", url: "https://destination.com/page"})
+
+      conn =
+        build_redirect_conn("/#{link.key}")
+        |> Plug.Conn.put_req_header("referer", "https://www.test.link/")
+
+      Redirect.handle_redirect(conn, "test.link", link.key)
+
+      click = Links.link_clicks(link.id) |> hd()
+      assert click.source_medium == nil
+      assert click.source_platform == nil
+    end
+
+    test "returning visitor keeps one identity across redirect and landing beacon" do
+      link = create_link!(%{domain: "test.link", url: "https://www.test.link/page"})
+
+      {:ok, existing} =
+        GoodAnalytics.resolve_visitor(%{ga_id: "existing"}, workspace_id: @workspace_id)
+
+      conn =
+        build_redirect_conn("/#{link.key}")
+        |> Plug.Conn.put_req_header("cookie", "_ga_good=existing")
+
+      result = Redirect.handle_redirect(conn, "test.link", link.key)
+
+      handed_off = ga_id_from_redirect(result)
+      assert handed_off == "existing"
+
+      assert {:ok, resolved} =
+               GoodAnalytics.resolve_visitor(%{ga_id: handed_off}, workspace_id: @workspace_id)
+
+      assert resolved.id == existing.id
+      assert [only] = Visitors.list_visitors(@workspace_id)
+      assert only.id == existing.id
+    end
+
+    test "returning visitor's ga_id is not handed to an off-site destination" do
+      link = create_link!(%{domain: "test.link", url: "https://partner.example.org/x"})
+
+      {:ok, _existing} =
+        GoodAnalytics.resolve_visitor(%{ga_id: "existing"}, workspace_id: @workspace_id)
+
+      result = Redirect.handle_redirect(returning_conn(link, "existing"), "test.link", link.key)
+
+      click = Links.link_clicks(link.id) |> hd()
+      handed_off = ga_id_from_redirect(result)
+      refute handed_off == "existing"
+      assert {:ok, _} = Ecto.UUID.cast(handed_off)
+      assert click.click_id == handed_off
+    end
+
+    test "returning visitor's ga_id is handed to a destination listed in internal_hosts" do
+      put_internal_hosts(["Site.example"])
+      link = create_link!(%{domain: "test.link", url: "https://www.site.example/x"})
+
+      {:ok, _existing} =
+        GoodAnalytics.resolve_visitor(%{ga_id: "existing"}, workspace_id: @workspace_id)
+
+      result = Redirect.handle_redirect(returning_conn(link, "existing"), "test.link", link.key)
+
+      assert ga_id_from_redirect(result) == "existing"
+    end
+
+    test "returning visitor's ga_id is handed to a destination on the link's own domain" do
+      link = create_link!(%{domain: "go.example", url: "https://go.example/x"})
+
+      {:ok, _existing} =
+        GoodAnalytics.resolve_visitor(%{ga_id: "existing"}, workspace_id: @workspace_id)
+
+      result = Redirect.handle_redirect(returning_conn(link, "existing"), "go.example", link.key)
+
+      assert ga_id_from_redirect(result) == "existing"
+    end
+
+    test "owned destination falls back to the cookie when the visitor has no ga_id, then the click id" do
+      put_internal_hosts(["site.example"])
+      link = create_link!(%{domain: "test.link", url: "https://site.example/x"})
+
+      # Cookie value is resolved as the visitor's ga_id, so the hand-off is the cookie.
+      with_cookie =
+        Redirect.handle_redirect(returning_conn(link, "cookie-id"), "test.link", link.key)
+
+      assert ga_id_from_redirect(with_cookie) == "cookie-id"
+
+      # No cookie: the click id seeds the new visitor and is handed off.
+      other = create_link!(%{domain: "test.link", url: "https://site.example/y"})
+
+      no_cookie =
+        Redirect.handle_redirect(build_redirect_conn("/#{other.key}"), "test.link", other.key)
+
+      assert [%{click_id: click_id}] = Links.link_clicks(other.id)
+      assert ga_id_from_redirect(no_cookie) == click_id
+    end
+
+    test "first-time visitor's ga_id hand-off resolves to the visitor the click created" do
+      link = create_link!(%{domain: "test.link", url: "https://destination.com/page"})
+
+      result =
+        Redirect.handle_redirect(build_redirect_conn("/#{link.key}"), "test.link", link.key)
+
+      handed_off = ga_id_from_redirect(result)
+      click = Links.link_clicks(link.id) |> hd()
+
+      assert {:ok, resolved} =
+               GoodAnalytics.resolve_visitor(%{ga_id: handed_off}, workspace_id: @workspace_id)
+
+      assert resolved.id == click.visitor_id
+      assert [_only] = Visitors.list_visitors(@workspace_id)
+    end
+
+    test "link utm fields classify a referrer-less click" do
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://destination.com/page",
+          utm_source: "newsletter",
+          utm_medium: "email"
+        })
+
+      Redirect.handle_redirect(build_redirect_conn("/#{link.key}"), "test.link", link.key)
+
+      click = Links.link_clicks(link.id) |> hd()
+      assert click.source_medium == "email"
+
+      visitor = Visitors.get_visitor(click.visitor_id)
+      assert (visitor.last_source["medium"] || visitor.last_source[:medium]) == "email"
+    end
+
+    test "request utms override link utms" do
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://destination.com/page",
+          utm_source: "linkedin",
+          utm_medium: "social"
+        })
+
+      conn = build_redirect_conn("/#{link.key}?utm_source=x&utm_medium=cpc")
+      Redirect.handle_redirect(conn, "test.link", link.key)
+
+      click = Links.link_clicks(link.id) |> hd()
+      assert click.source_medium == "paid"
+    end
+
+    test "a link without utms still classifies from the referer" do
+      link = create_link!(%{domain: "test.link", url: "https://destination.com/page"})
+
+      conn =
+        build_redirect_conn("/#{link.key}")
+        |> Plug.Conn.put_req_header("referer", "https://www.linkedin.com/feed")
+
+      Redirect.handle_redirect(conn, "test.link", link.key)
+
+      click = Links.link_clicks(link.id) |> hd()
+      assert click.source_medium == "social"
+      assert click.source_platform == "linkedin"
     end
 
     test "redirect increments link click counters" do
@@ -409,6 +584,58 @@ defmodule GoodAnalytics.Integration.RedirectFlowTest do
         end)
 
       assert log =~ "geo_targeting URL failed scheme/host check"
+    end
+  end
+
+  describe "tagged newsletter link into a landing pageview" do
+    test "the landing beacon is email and belongs to the clicking visitor" do
+      put_internal_hosts(["site.test"])
+
+      link =
+        create_link!(%{
+          domain: "test.link",
+          url: "https://site.test/jobs/1",
+          utm_source: "newsletter",
+          utm_medium: "email",
+          utm_campaign: "spring"
+        })
+
+      redirect =
+        Redirect.handle_redirect(build_redirect_conn("/#{link.key}"), "test.link", link.key)
+
+      assert redirect.status == 302
+
+      [location] = Plug.Conn.get_resp_header(redirect, "location")
+      destination = URI.parse(location)
+      ga_id = destination.query |> URI.decode_query() |> Map.fetch!("ga_id")
+      click_visitor_id = hd(Links.link_clicks(link.id)).visitor_id
+
+      conn =
+        conn(:post, "/ga/t/event")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Conn.put_req_header("user-agent", "RedirectFlowTest/1.0")
+        |> Plug.Conn.put_private(:phoenix_format, "json")
+        |> BeaconController.event(%{
+          "event_type" => "pageview",
+          "anonymous_id" => "anon-#{System.unique_integer([:positive])}",
+          "ga_id" => ga_id,
+          "url" => location,
+          "referrer" => ""
+        })
+
+      assert %{"status" => "ok"} = Jason.decode!(conn.resp_body)
+
+      event =
+        GoodAnalytics.Repo.repo().one!(
+          Ecto.Query.from(e in GoodAnalytics.Core.Events.Event,
+            where: e.event_type == "pageview" and e.visitor_id == ^click_visitor_id
+          ),
+          prefix: "good_analytics"
+        )
+
+      assert event.source_medium == "email"
+      assert event.source_platform == "newsletter"
+      assert event.source_campaign == "spring"
     end
   end
 end

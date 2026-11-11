@@ -1,11 +1,9 @@
 defmodule GoodAnalytics.Core.Sessions.EngagementTest do
   use GoodAnalytics.DataCase, async: false
 
-  alias GoodAnalytics.Core.Events
+  alias GoodAnalytics.Core.{Events, Sessions, Visitors}
   alias GoodAnalytics.Core.Events.Recorder
-  alias GoodAnalytics.Core.Sessions
   alias GoodAnalytics.Core.Sessions.Session
-  alias GoodAnalytics.Core.Visitors
 
   @ws GoodAnalytics.default_workspace_id()
 
@@ -118,5 +116,34 @@ defmodule GoodAnalytics.Core.Sessions.EngagementTest do
     assert session_after.engaged_seconds == session_before.engaged_seconds
     assert session_after.duration_seconds == session_before.duration_seconds
     assert session_after.last_event_at == session_before.last_event_at
+  end
+
+  test "engagement from a bot user agent records device and bot_name" do
+    visitor = create_visitor!()
+    {:ok, _pv} = record(visitor, "pageview", %{url: "https://x.test/a"})
+
+    {:ok, eng} =
+      record(visitor, "engagement", %{
+        engaged_ms: 3_000,
+        user_agent: "Mozilla/5.0 (compatible; GPTBot/1.1; +https://openai.com/gptbot)"
+      })
+
+    assert eng.device_type == "bot"
+    assert eng.bot_name == "GPTBot"
+  end
+
+  test "pageview from HeadlessChrome marks the event and the visitor as a bot" do
+    visitor = create_visitor!()
+
+    {:ok, event} =
+      record(visitor, "pageview", %{
+        url: "https://x.test/a",
+        user_agent:
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/124.0.0.0 Safari/537.36"
+      })
+
+    assert event.bot_name == "HeadlessChrome"
+    assert event.device_type == "bot"
+    assert Visitors.get_visitor(visitor.id).device["type"] == "bot"
   end
 end

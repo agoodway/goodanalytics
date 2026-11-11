@@ -103,6 +103,8 @@
       // Auto-track pageview after init
       if (this.config.autoPageview !== false) {
         this.track('pageview');
+        // Seed SPA dedup so replaceState/hashchange on the same URL isn't a new view.
+        this._lastSpaPageview = {url: window.location.href};
       }
 
       this._setupSpaNavigation();
@@ -392,7 +394,12 @@
           changed = true;
         }
       }
-      if (changed) window.history.replaceState({}, '', u.toString());
+      if (changed) {
+        // Use the unwrapped native method so cleaning the URL isn't an SPA pageview.
+        var replace = this._originalReplaceState || window.history.replaceState;
+        replace.call(window.history, {}, '', u.toString());
+        if (this._lastSpaPageview) this._lastSpaPageview = {url: window.location.href};
+      }
     },
 
     // Module system: register optional modules. Modules registered before
@@ -574,7 +581,7 @@
       this._spaNavigationSetup = true;
       this._originalPushState = window.history.pushState;
       this._originalReplaceState = window.history.replaceState;
-      this._lastSpaPageview = null;
+      this._lastSpaPageview = this._lastSpaPageview || null;
 
       var self = this;
 
@@ -601,14 +608,12 @@
 
     _trackSpaPageview: function() {
       var url = window.location.href;
-      var now = Date.now();
       var last = this._lastSpaPageview;
 
-      if (last && last.url === url && now - last.at < 250) {
-        return;
-      }
+      // Only a URL change is a pageview; same-URL replaceState/hashchange is not.
+      if (last && last.url === url) return;
 
-      this._lastSpaPageview = {url: url, at: now};
+      this._lastSpaPageview = {url: url};
       this.track('pageview');
     },
 

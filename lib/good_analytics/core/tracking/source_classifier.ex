@@ -8,16 +8,36 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
   3. UTM parameters — explicit marketer intent
   4. Referer header — domain-based classification
 
-  Compile-time defaults for click ID params and referer map can be
-  overridden at runtime via `GoodAnalytics.Settings`.
+  A referer on the page's own host (`www.` ignored) or on a configured internal
+  host is internal navigation, not a source: `classify/2` returns `nil` for it,
+  the same as for ignored hand-off hosts (`nil` is the one "no source" result:
+  callers keep the visitor's previous source). It is only considered when no
+  click id, `via`/`ref` param or UTM matched; explicit intent still wins.
+
+  Internal hosts are the `:page_host` option plus `:internal_hosts` (option, or
+  `config :good_analytics, internal_hosts: ["go.example.com"]`, read at call
+  time). `internal_hosts` should list ALL of a site's own domains, short-link
+  and alias domains included, since only the page's own host is known
+  automatically. Hosts compare lowercase, ignoring `www.` and any port.
+
+  Referer hosts, UTM source names and display names come from the vendored
+  referrer database (`GoodAnalytics.Core.Tracking.Referers`). Compile-time
+  defaults for click ID params can be overridden, and the referer lookup
+  extended, at runtime via the `:overrides` option.
   """
+
+  alias GoodAnalytics.Core.Events.UrlNormalizer
+  alias GoodAnalytics.Core.Tracking.Referers
+  alias GoodAnalytics.Text
+
+  @email_sources ~w(newsletter email)
 
   @click_id_params %{
     "gclid" => {:google_ads, :paid},
     "gbraid" => {:google_ads, :paid},
     "wbraid" => {:google_ads, :paid},
     "msclkid" => {:microsoft_ads, :paid},
-    "fbclid" => {:meta, :social},
+    "fbclid" => {:facebook, :social},
     "ttclid" => {:tiktok, :paid},
     "twclid" => {:twitter_ads, :paid},
     "li_fat_id" => {:linkedin_ads, :paid},
@@ -27,140 +47,6 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     "irclickid" => {:impact_radius, :affiliate}
   }
 
-  @base_referer_map %{
-    # Social
-    "facebook.com" => {:facebook, :social},
-    "m.facebook.com" => {:facebook, :social},
-    "l.facebook.com" => {:facebook, :social},
-    "lm.facebook.com" => {:facebook, :social},
-    "fb.com" => {:facebook, :social},
-    "fb.me" => {:facebook, :social},
-    "instagram.com" => {:instagram, :social},
-    "l.instagram.com" => {:instagram, :social},
-    "t.co" => {:twitter, :social},
-    "twitter.com" => {:twitter, :social},
-    "x.com" => {:twitter, :social},
-    "linkedin.com" => {:linkedin, :social},
-    "lnkd.in" => {:linkedin, :social},
-    "youtube.com" => {:youtube, :social},
-    "youtu.be" => {:youtube, :social},
-    "reddit.com" => {:reddit, :social},
-    "old.reddit.com" => {:reddit, :social},
-    "out.reddit.com" => {:reddit, :social},
-    "tiktok.com" => {:tiktok, :social},
-    "pinterest.com" => {:pinterest, :social},
-    "threads.net" => {:threads, :social},
-    "bsky.app" => {:bluesky, :social},
-    # Search
-    "google.com" => {:google, :organic},
-    "google.co.uk" => {:google, :organic},
-    "bing.com" => {:bing, :organic},
-    "duckduckgo.com" => {:duckduckgo, :organic},
-    "yahoo.com" => {:yahoo, :organic},
-    "baidu.com" => {:baidu, :organic},
-    # Email (webmail UIs that send a referer on click)
-    "mail.google.com" => {:gmail, :email},
-    "mail.googleusercontent.com" => {:gmail, :email},
-    "outlook.live.com" => {:outlook, :email},
-    "outlook.office.com" => {:outlook, :email},
-    "outlook.office365.com" => {:outlook, :email},
-    "outlook.com" => {:outlook, :email},
-    "mail.yahoo.com" => {:yahoo_mail, :email},
-    "mail.yahoo.co.jp" => {:yahoo_mail, :email},
-    "mail.icloud.com" => {:icloud_mail, :email},
-    "mail.aol.com" => {:aol_mail, :email},
-    "mail.proton.me" => {:proton_mail, :email},
-    "mail.zoho.com" => {:zoho_mail, :email},
-    "mail.gmx.com" => {:gmx, :email},
-    "mail.gmx.net" => {:gmx, :email},
-    "mail.gmx.de" => {:gmx, :email},
-    "mail.web.de" => {:web_de, :email},
-    "e.mail.ru" => {:mailru, :email},
-    "mail.yandex.ru" => {:yandex_mail, :email},
-    "mail.yandex.com" => {:yandex_mail, :email},
-    "mail.naver.com" => {:naver_mail, :email},
-    "app.fastmail.com" => {:fastmail, :email},
-    "mail.tutanota.com" => {:tuta, :email},
-    "app.hey.com" => {:hey, :email},
-    # Messaging
-    "web.whatsapp.com" => {:whatsapp, :messaging},
-    "web.telegram.org" => {:telegram, :messaging},
-    "slack.com" => {:slack, :messaging},
-    "app.slack.com" => {:slack, :messaging},
-    "discord.com" => {:discord, :messaging}
-  }
-
-  # AI assistant referrers (research-documented; medium :ai). Each host maps to a
-  # canonical vendor so the referer and utm_source paths agree. Extensible at
-  # runtime via the `:overrides` option.
-  @ai_referer_map %{
-    "chatgpt.com" => {:chatgpt, :ai},
-    "chat.openai.com" => {:chatgpt, :ai},
-    "chat-gpt.org" => {:chatgpt, :ai},
-    "openai.com" => {:chatgpt, :ai},
-    "claude.ai" => {:claude, :ai},
-    "anthropic.com" => {:claude, :ai},
-    "perplexity.ai" => {:perplexity, :ai},
-    "copilot.microsoft.com" => {:copilot, :ai},
-    "edgeservices.bing.com" => {:copilot, :ai},
-    "turing.microsoft.com" => {:copilot, :ai},
-    "cosmos.microsoft.com" => {:copilot, :ai},
-    "gemini.google.com" => {:gemini, :ai},
-    "bard.google.com" => {:gemini, :ai},
-    "deepmind.com" => {:gemini, :ai},
-    "grok.com" => {:grok, :ai},
-    "grok.x.com" => {:grok, :ai},
-    "x.ai" => {:grok, :ai},
-    "deepseek.com" => {:deepseek, :ai},
-    "you.com" => {:you, :ai},
-    "meta.ai" => {:meta_ai, :ai},
-    "mistral.ai" => {:mistral, :ai},
-    "chat.mistral.ai" => {:mistral, :ai},
-    "character.ai" => {:character_ai, :ai},
-    "huggingface.co" => {:huggingchat, :ai},
-    "huggingchat.com" => {:huggingchat, :ai},
-    "phind.com" => {:phind, :ai},
-    "pi.ai" => {:pi, :ai},
-    "zhipu.ai" => {:zhipu, :ai},
-    "chatglm.cn" => {:zhipu, :ai},
-    "qwenlm.ai" => {:qwen, :ai},
-    "chat.qwen.ai" => {:qwen, :ai},
-    "felo.ai" => {:felo, :ai},
-    "komo.ai" => {:komo, :ai},
-    "iask.ai" => {:iask, :ai},
-    "sider.ai" => {:sider, :ai},
-    "venice.ai" => {:venice, :ai},
-    "duck.ai" => {:duckai, :ai},
-    "cohere.ai" => {:cohere, :ai},
-    "jasper.ai" => {:jasper, :ai},
-    "writesonic.com" => {:writesonic, :ai},
-    "quillbot.com" => {:quillbot, :ai},
-    "wordtune.com" => {:wordtune, :ai},
-    "copy.ai" => {:copyai, :ai},
-    "blackbox.ai" => {:blackbox, :ai},
-    "openchat.so" => {:openchat, :ai},
-    "open-assistant.io" => {:open_assistant, :ai},
-    "openrouter.ai" => {:openrouter, :ai},
-    "lmarena.ai" => {:lmarena, :ai},
-    "coze.com" => {:coze, :ai},
-    "exa.ai" => {:exa, :ai},
-    "forefront.ai" => {:forefront, :ai},
-    "reka.ai" => {:reka, :ai},
-    "ai21.com" => {:ai21, :ai},
-    "deepl.com" => {:deepl, :ai},
-    "chat.suno.com" => {:suno, :ai},
-    "neeva.com" => {:neeva, :ai},
-    "nimble.ai" => {:nimble, :ai},
-    "bnngpt.com" => {:bnngpt, :ai},
-    "firefly.adobe.com" => {:adobe_firefly, :ai}
-  }
-
-  @referer_map Map.merge(@base_referer_map, @ai_referer_map)
-
-  # Canonical platform per AI domain, for matching `utm_source` values that
-  # arrive without a referrer (e.g. ?utm_source=chatgpt.com).
-  @ai_sources Map.new(@ai_referer_map, fn {host, {platform, _medium}} -> {host, platform} end)
-
   @doc """
   Classifies the source of an inbound request.
 
@@ -168,10 +54,17 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
 
   ## Options
 
-    * `:overrides` - map with optional `:click_id_params` and `:referer_map`
-      keys to override compile-time defaults.
+    * `:overrides` - map with optional `:click_id_params` (replaces the
+      defaults) and `:referer_map` (exact-domain entries consulted before the
+      vendored referrer database).
 
-  Returns a map with source classification fields.
+    * `:page_host` - host of the page being visited. A referer on this host is
+      internal navigation.
+    * `:internal_hosts` - extra hosts treated as internal. Defaults to
+      `Application.get_env(:good_analytics, :internal_hosts, [])`.
+
+  Returns a map with source classification fields, or `nil` when there is no
+  source (internal navigation, or an ignored hand-off host).
   """
   def classify(conn_or_map, opts \\ [])
 
@@ -190,17 +83,74 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     overrides = Keyword.get(opts, :overrides, %{})
 
     click_id_map = Map.get(overrides, :click_id_params, @click_id_params)
-    ref_map = Map.get(overrides, :referer_map, @referer_map)
+    ref_map = Map.get(overrides, :referer_map, %{})
 
     captured_click_ids = capture_all_click_ids(params, click_id_map)
     click_id_source = detect_primary_click_id(params, click_id_map)
     utm_source = parse_utms(params)
-    referer_source = classify_referer(referer, ref_map)
+    utm_intent = if match?(%{medium: _}, utm_source), do: utm_source
     ga_source = detect_ga_params(params)
 
-    merge_sources(click_id_source, ga_source, utm_source, referer_source)
-    |> Map.put(:captured_click_ids, captured_click_ids)
+    if internal_navigation?(referer, [click_id_source, ga_source, utm_intent], opts) do
+      nil
+    else
+      referer_source = classify_referer(referer, ref_map)
+
+      case merge_sources(click_id_source, ga_source, utm_source, referer_source) do
+        %{medium: _} = merged -> Map.put(merged, :captured_click_ids, captured_click_ids)
+        _no_source -> nil
+      end
+    end
   end
+
+  @doc """
+  Classifies a tracker beacon payload (`"url"` and `"referrer"` keys).
+
+  Builds the signal from the page URL's query string and the document referrer,
+  with the page URL's host as `:page_host`. Accepts the same options as
+  `classify/2`. Returns `nil` when there is no source.
+  """
+  @spec classify_beacon(map(), keyword()) :: map() | nil
+  def classify_beacon(params, opts \\ []) when is_map(params) do
+    url = Map.get(params, "url")
+
+    classify(
+      %{query_params: url_query_params(url), referer: Map.get(params, "referrer")},
+      Keyword.put_new(opts, :page_host, page_host(url))
+    )
+  end
+
+  @doc """
+  Returns true when `referer` is on one of `hosts`.
+
+  Hosts compare lowercase with `www.`, port and trailing dot ignored. Nil,
+  blank and unparseable referers are never internal.
+  """
+  @spec internal_referer?(String.t() | nil, [String.t() | nil]) :: boolean()
+  def internal_referer?(referer, hosts) when is_binary(referer) and is_list(hosts) do
+    case comparable_host(referer) do
+      nil -> false
+      host -> host in Enum.flat_map(hosts, &List.wrap(comparable_host(&1)))
+    end
+  end
+
+  def internal_referer?(_referer, _hosts), do: false
+
+  @doc """
+  Returns true when a destination URL (or bare host) is on one of `hosts`.
+
+  The same comparison as `internal_referer?/2`, named for ownership of a link
+  destination rather than the origin of a visit.
+  """
+  @spec same_site?(String.t() | nil, [String.t() | nil]) :: boolean()
+  def same_site?(url_or_host, hosts), do: internal_referer?(url_or_host, hosts)
+
+  @doc """
+  The configured internal hosts: `config :good_analytics, internal_hosts: [...]`,
+  read at call time.
+  """
+  @spec internal_hosts() :: [String.t()]
+  def internal_hosts, do: List.wrap(Application.get_env(:good_analytics, :internal_hosts, []))
 
   @doc """
   Captures all recognized ad platform click IDs from query params.
@@ -237,6 +187,43 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
 
   # -- Private --
 
+  defp internal_navigation?(referer, explicit_sources, opts) do
+    Enum.all?(explicit_sources, &is_nil/1) and
+      internal_referer?(referer, request_hosts(opts))
+  end
+
+  defp request_hosts(opts) do
+    configured = Keyword.get_lazy(opts, :internal_hosts, &internal_hosts/0)
+    [Keyword.get(opts, :page_host) | List.wrap(configured)]
+  end
+
+  defp page_host(url) when is_binary(url), do: UrlNormalizer.host(url)
+  defp page_host(_url), do: nil
+
+  defp url_query_params(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{query: query} when is_binary(query) ->
+        query |> URI.decode_query() |> drop_invalid_utf8()
+
+      _uri ->
+        %{}
+    end
+  end
+
+  defp url_query_params(_url), do: %{}
+
+  # A percent-escape can decode to invalid UTF-8 (`%E9`), which later string
+  # and regex work raises on; such a pair carries nothing usable.
+  defp drop_invalid_utf8(params) do
+    Map.filter(params, fn {key, value} -> String.valid?(key) and String.valid?(value) end)
+  end
+
+  # Single-label dev hosts such as `localhost` are comparable too.
+  defp comparable_host(value) when is_binary(value),
+    do: Referers.bare_host(value, allow_single_label: true)
+
+  defp comparable_host(_value), do: nil
+
   defp detect_primary_click_id(params, click_id_map) do
     Enum.find_value(click_id_map, fn {param, {platform, medium}} ->
       case Map.get(params, param) do
@@ -255,34 +242,67 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     end)
   end
 
+  # With no `utm_source` and no `utm_medium` there is no source or medium to
+  # assert, so a campaign-only map is returned (no `:platform`/`:medium` keys):
+  # the referer, or direct, supplies those and the campaign is carried through.
   defp parse_utms(params) do
     utms = Map.take(params, ~w(utm_source utm_medium utm_campaign utm_content utm_term))
+    raw_source = utm_value(utms, "utm_source")
+    raw_medium = utm_value(utms, "utm_medium")
 
-    if map_size(utms) > 0 do
-      raw_source = Map.get(utms, "utm_source")
-      ai_platform = ai_source_platform(raw_source)
+    cond do
+      map_size(utms) == 0 ->
+        nil
 
-      %{
-        platform: ai_platform || raw_source,
-        medium:
-          if(ai_platform,
-            do: :ai,
-            else: normalize_medium(Map.get(utms, "utm_medium", "unknown"))
-          ),
-        campaign: Map.get(utms, "utm_campaign"),
-        content: Map.get(utms, "utm_content"),
-        term: Map.get(utms, "utm_term"),
-        confidence: :medium
-      }
+      is_nil(raw_source) and is_nil(raw_medium) ->
+        utm_extras(utms)
+
+      true ->
+        {platform, medium} = utm_platform_and_medium(raw_source, raw_medium)
+
+        Map.merge(utm_extras(utms), %{platform: platform, medium: medium, confidence: :medium})
     end
   end
 
-  # Maps a known AI `utm_source` domain to its canonical platform (`nil` otherwise).
-  defp ai_source_platform(nil), do: nil
-
-  defp ai_source_platform(source) when is_binary(source) do
-    Map.get(@ai_sources, source |> String.downcase() |> String.replace_prefix("www.", ""))
+  defp utm_value(utms, key) do
+    case Map.get(utms, key) do
+      value when is_binary(value) -> Text.blank_to_nil(value)
+      _other -> nil
+    end
   end
+
+  defp utm_extras(utms) do
+    %{
+      campaign: Map.get(utms, "utm_campaign"),
+      content: Map.get(utms, "utm_content"),
+      term: Map.get(utms, "utm_term")
+    }
+  end
+
+  # A known `utm_source` (host or alias) becomes its canonical platform atom so
+  # it agrees with the referer path. AI assistants are always `:ai`; other
+  # known platforms keep the marketer's `utm_medium`. Without a `utm_medium`
+  # the medium is inferred: the platform's own medium, `:email` for the generic
+  # `newsletter`/`email` sources, else `:referral`. Unknown sources keep the raw
+  # string. The medium is never `"unknown"`.
+  defp utm_platform_and_medium(raw_source, raw_medium) do
+    case Referers.resolve(raw_source) do
+      %{platform: platform, medium: :ai} -> {platform, :ai}
+      %{platform: platform} = known -> {platform, resolve_medium(raw_medium, known.medium)}
+      nil -> {raw_source, resolve_medium(raw_medium, generic_source_medium(raw_source))}
+    end
+  end
+
+  defp resolve_medium(nil, inferred), do: inferred
+
+  defp resolve_medium(medium, _inferred),
+    do: medium |> String.trim() |> String.downcase() |> normalize_medium()
+
+  defp generic_source_medium(source) when is_binary(source) do
+    if String.downcase(String.trim(source)) in @email_sources, do: :email, else: :referral
+  end
+
+  defp generic_source_medium(_source), do: :referral
 
   defp classify_referer(nil, _ref_map),
     do: %{platform: :direct, medium: :direct, confidence: :low}
@@ -291,12 +311,17 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
     do: %{platform: :direct, medium: :direct, confidence: :low}
 
   defp classify_referer(referer, ref_map) do
-    domain =
-      URI.parse(referer).host
-      |> to_string()
-      |> String.replace_prefix("www.", "")
+    case Referers.bare_host(referer) do
+      nil -> classify_referer(nil, ref_map)
+      domain -> classify_host(referer, domain, ref_map)
+    end
+  end
 
-    case Map.get(ref_map, domain) do
+  defp classify_host(referer, domain, ref_map) do
+    case lookup_domain(domain, ref_map) do
+      {_platform, :ignore} ->
+        nil
+
       {platform, medium} ->
         %{
           platform: platform,
@@ -314,6 +339,20 @@ defmodule GoodAnalytics.Core.Tracking.SourceClassifier do
           referer_url: referer,
           confidence: :low
         }
+    end
+  end
+
+  defp lookup_domain(domain, ref_map) do
+    case Map.fetch(ref_map, domain) do
+      {:ok, found} -> found
+      :error -> vendored_lookup(domain)
+    end
+  end
+
+  defp vendored_lookup(domain) do
+    case Referers.lookup(domain) do
+      %{platform: platform, medium: medium} -> {platform, medium}
+      nil -> nil
     end
   end
 

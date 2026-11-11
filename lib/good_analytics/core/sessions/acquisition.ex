@@ -36,6 +36,12 @@ defmodule GoodAnalytics.Core.Sessions.Acquisition do
     |> Enum.all?(&is_nil/1)
   end
 
+  @doc "True for the `direct` platform/medium spelled as an atom or a string (any case)."
+  @spec direct_value?(term()) :: boolean()
+  def direct_value?(:direct), do: true
+  def direct_value?(value) when is_binary(value), do: String.downcase(value) == "direct"
+  def direct_value?(_value), do: false
+
   @doc """
   Decides how a new event's acquisition attrs affect a live session.
   """
@@ -88,21 +94,19 @@ defmodule GoodAnalytics.Core.Sessions.Acquisition do
 
   defp normalize(_key, value), do: normalize_string(value)
 
+  # "nil" is a legacy artifact: an old recorder wrote the string for a missing
+  # value. It must never count as a real acquisition signal.
   defp normalize_string(value) when is_binary(value) do
     case String.trim(value) do
       "" -> nil
+      "nil" -> nil
       trimmed -> trimmed
     end
   end
 
   defp normalize_string(value), do: value
 
-  defp direct_to_nil(value) when is_binary(value) do
-    if String.downcase(value) == "direct", do: nil, else: value
-  end
-
-  defp direct_to_nil(:direct), do: nil
-  defp direct_to_nil(value), do: value
+  defp direct_to_nil(value), do: if(direct_value?(value), do: nil, else: value)
 
   defp cast_click_id(nil), do: nil
 

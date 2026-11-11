@@ -129,14 +129,19 @@ defmodule GoodAnalytics.Core.Links.Link do
 
   @doc """
   Returns true when `url` is a non-empty string with an `http` or `https`
-  scheme and a non-empty host. Public so the redirect path can apply the
-  same check at read time as a defense-in-depth against data that bypassed
-  the changeset.
+  scheme and a non-empty host, with no userinfo and no backslash. Browsers
+  treat a backslash as a slash, so `https://a.example\\@b.test/` navigates to
+  `a.example` while `URI.parse/1` reports `b.test`; both forms are rejected so
+  host checks on the destination can be trusted. Public so the redirect path
+  can apply the same check at read time as a defense-in-depth against data
+  that bypassed the changeset.
   """
   @spec valid_http_url?(term()) :: boolean()
   def valid_http_url?(url) when is_binary(url) and url != "" do
     uri = URI.parse(url)
-    uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != ""
+
+    not String.contains?(url, "\\") and is_nil(uri.userinfo) and
+      uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != ""
   end
 
   def valid_http_url?(_), do: false

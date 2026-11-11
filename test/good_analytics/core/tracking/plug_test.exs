@@ -41,6 +41,18 @@ defmodule GoodAnalytics.Core.Tracking.PlugTest do
       assert Map.has_key?(result.assigns, :ga_source)
     end
 
+    test "a referer on the request host (www vs apex) is internal navigation" do
+      conn =
+        conn(:get, "/pricing")
+        |> Map.put(:host, "www.site.test")
+        |> Plug.Conn.put_req_header("referer", "https://site.test/")
+        |> Plug.Conn.fetch_cookies()
+        |> Plug.Conn.fetch_query_params()
+
+      result = TrackingPlug.call(conn, TrackingPlug.init([]))
+      assert result.assigns.ga_source == nil
+    end
+
     test "generates anonymous ID when no cookie present" do
       conn =
         conn(:get, "/pricing")

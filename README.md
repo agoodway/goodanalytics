@@ -28,7 +28,7 @@ GoodAnalytics is a pluggable Elixir/Phoenix library that adds a visitor identity
 ```elixir
 def deps do
   [
-    {:good_analytics, "~> 0.2.0"}
+    {:good_analytics, "~> 0.3.0"}
   ]
 end
 ```
@@ -89,6 +89,7 @@ config :good_analytics,
 | `:auto_create_partitions` | No | `true` | Whether to auto-create time partitions |
 | `:links` | No | `[]` | Link configuration, e.g. `[domains: ["mybrand.link"]]` |
 | `:api_authenticate` | No | — | Auth callback for REST API (`{Module, :function}` or fn/2) |
+| `:internal_hosts` | No | `[]` | The site's own domains. A referer on the page's own host or any listed host is internal navigation, not a traffic source. List ALL your domains, short-link domains included (`www.` and ports are ignored). Link redirects hand a returning visitor's `ga_id` only to destinations on these hosts (or the short-link host or link domain), so list your site domains here to carry identity across them; other destinations get a per-click id |
 
 **Cache configuration** (optional):
 
@@ -126,6 +127,14 @@ mix setup
 ```
 
 The UA databases persist in `_build` and only need to be downloaded once.
+
+`ua_inspector` 3.12.0 defaults to the 6.5.0 device database release. Pin the
+newer one in your host app so bot and device detection stay current:
+
+```elixir
+# config/config.exs
+config :ua_inspector, remote_release: "6.5.2"
+```
 
 ### 4. (Optional) Set Up Geo Enrichment
 
@@ -416,6 +425,18 @@ persists future merges' intended fields; the repair specifically restores the
 three accumulated identifier arrays. Host-owned references to merged visitors
 remain the host application's responsibility. V14 does not replay merge hooks
 or modify host tables.
+
+#### Schema version 15: `'nil'` source repair
+
+Earlier versions stored the literal string `'nil'` in `source_platform`,
+`source_medium` and `source_campaign` when a request had no source. V15 sets
+those exact values to NULL on `ga_events` and `ga_sessions`; it is idempotent and
+rolling down is a no-op. Add a host migration wrapper:
+
+```elixir
+def up, do: GoodAnalytics.Migration.up(version: 15)
+def down, do: GoodAnalytics.Migration.down(version: 14)
+```
 
 ### Fresh dev environments
 
@@ -795,6 +816,41 @@ GoodAnalytics.share_urls("https://mybrand.link/gw-launch",
 # => %{twitter: "https://twitter.com/intent/tweet?...", facebook: "https://www.facebook.com/sharer/...", ...}
 ```
 
+### Sources and Channels
+
+Every event and visitor source is a `{platform, medium}` pair.
+`GoodAnalytics.Sources` turns it into a GA4-aligned channel and label, so a host
+app and its dashboards share one vocabulary:
+
+```elixir
+GoodAnalytics.Sources.channel(%{platform: :facebook, medium: :paid})
+# => :paid_social
+GoodAnalytics.Sources.channel_name(:paid_social)
+# => "Paid Social"
+GoodAnalytics.Sources.label(%{platform: :duck_ai, medium: :ai})
+# => "AI Assistant · Duck.ai"
+GoodAnalytics.Sources.mediums(:organic_social)
+# => ["messaging", "organic_social", "social"]
+```
+
+For Ecto queries, `Sources.channel_fragment/2` (a macro) and
+`Sources.channel_sql/1` (a SQL CASE for a table alias) group rows by the same
+channels in the database.
+
+Classification uses referrer data vendored from the Snowplow referer-parser and
+Matomo search engine and social lists, plus a hand-kept supplement
+(`priv/referers/good_analytics_referers.yml`). Library maintainers refresh the vendored data (host apps do not need to) with:
+
+```bash
+mix good_analytics.referers.update                        # latest upstream
+mix good_analytics.referers.update --snowplow-ref SHA --matomo-ref SHA
+mix good_analytics.referers.update --dry-run              # report only
+```
+
+Set `config :good_analytics, internal_hosts: ["mysite.test", "my.link"]` and list
+ALL of your own site and short-link domains, so navigation between them is not
+recorded as a traffic source.
+
 ## Connector Configuration
 
 ### Enabling Connectors
@@ -879,6 +935,7 @@ end
 |------|-------------|
 | `mix good_analytics.setup` | Generate the initial `*_setup_good_analytics.exs` migration (first install only) |
 | `mix good_analytics.gen.migration` | Generate an `*_update_good_analytics.exs` migration for pending library versions |
+| `mix good_analytics.referers.update` | Maintainer-only: refresh the vendored referrer database from a library checkout (`--snowplow-ref`, `--matomo-ref`, `--dry-run`) |
 | `mix ua_inspector.download` | Download UA detection databases |
 | `mix setup` | Run `deps.get` + `ua_inspector.download` |
 

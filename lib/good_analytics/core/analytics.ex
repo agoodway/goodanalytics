@@ -20,8 +20,7 @@ defmodule GoodAnalytics.Core.Analytics do
   alias GoodAnalytics.Core.Events.Event
   alias GoodAnalytics.Core.Sessions.Session
   alias GoodAnalytics.Core.Visitors.Visitor
-  alias GoodAnalytics.Repo
-  alias GoodAnalytics.TimeWindow
+  alias GoodAnalytics.{Repo, Sources, TimeWindow}
 
   @default_timezone "Etc/UTC"
 
@@ -610,6 +609,16 @@ defmodule GoodAnalytics.Core.Analytics do
     where(query, [s], fragment("?::text ILIKE ? ESCAPE '\\'", field(s, ^:click_id), ^pattern))
   end
 
+  # Sessions store direct as NULL; a blank source_medium counts as "direct"
+  # (see `Sources.medium_filter/2`).
+  defp session_filter_condition(query, :source_medium, operator, value)
+       when operator in [:eq, :neq, :in, :not_in] do
+    case Sources.medium_filter(operator, value) do
+      nil -> query
+      condition -> where(query, ^condition)
+    end
+  end
+
   defp session_filter_condition(query, field, :eq, value)
        when is_binary(value) and value != "",
        do: where(query, [s], field(s, ^field) == ^value)
@@ -668,6 +677,15 @@ defmodule GoodAnalytics.Core.Analytics do
        when is_binary(value) and value != "",
        do: where(query, [e], fragment("?::text", field(e, ^:link_id)) != ^value)
 
+  # A blank source_medium counts as "direct" (see `Sources.medium_filter/2`).
+  defp event_filter_condition(query, :source_medium, operator, value)
+       when operator in [:eq, :neq, :in, :not_in] do
+    case Sources.medium_filter(operator, value) do
+      nil -> query
+      condition -> where(query, ^condition)
+    end
+  end
+
   defp event_filter_condition(query, field, :eq, value)
        when is_binary(value) and value != "",
        do: where(query, [e], field(e, ^field) == ^value)
@@ -721,7 +739,7 @@ defmodule GoodAnalytics.Core.Analytics do
 
   defp timeseries_filter_condition({field, operator, value}, index)
        when field in @event_filter_fields and field != :inserted_at do
-    build_timeseries_condition(timeseries_filter_field(field), operator, value, index)
+    build_timeseries_condition(timeseries_filter_field(field, operator), operator, value, index)
   end
 
   defp timeseries_filter_condition(_filter, _index), do: :skip
@@ -750,8 +768,15 @@ defmodule GoodAnalytics.Core.Analytics do
 
   defp build_timeseries_condition(_sql_field, _operator, _value, _index), do: :skip
 
-  defp timeseries_filter_field(:link_id), do: "e.link_id::text"
-  defp timeseries_filter_field(field), do: "e.#{field}"
+  defp timeseries_filter_field(:link_id, _operator), do: "e.link_id::text"
+
+  # A blank source_medium counts as "direct", for the equality and membership
+  # operators only (see `Sources.medium_filter/2`).
+  defp timeseries_filter_field(:source_medium, operator)
+       when operator in [:eq, :neq, :in, :not_in],
+       do: Sources.medium_filter_sql("e.source_medium")
+
+  defp timeseries_filter_field(field, _operator), do: "e.#{field}"
 
   # Sobelow: `sql` is built from module-internal heredocs plus
   # `timeseries_filter_sql/2`, which emits only allowlisted column names from
