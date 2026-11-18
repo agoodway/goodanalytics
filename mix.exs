@@ -1,7 +1,7 @@
 defmodule GoodAnalytics.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
   @source_url "https://github.com/agoodway/goodanalytics"
 
   def project do
@@ -106,8 +106,6 @@ defmodule GoodAnalytics.MixProject do
       # Infrastructure
       {:ecto_evolver, "~> 0.1.0"},
       {:pgflow, "~> 0.7.0"},
-      # Required so PgFlow dashboard modules compile (optional dep of pgflow)
-      {:livefilter, "~> 0.2.0"},
 
       # Dev/Test
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},

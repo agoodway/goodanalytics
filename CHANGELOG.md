@@ -6,7 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches `1.0.0`. Until then, breaking changes may land in any release.
 
-## [0.3.0] - Unreleased
+## [0.3.1] - 2026-11-18
+
+### Changed
+
+- Drops the unused `livefilter` dependency. It was declared as a required
+  dependency (`~> 0.2.0`) but nothing in GoodAnalytics references it, and the
+  pin blocked hosts from using LiveFilter 0.3. Hosts that mount the PgFlow
+  dashboard should add `livefilter` to their own dependencies.
+
+## [0.3.0] - 2026-11-11
 
 Database schema version 15. Hosts need a new migration wrapper calling
 `GoodAnalytics.Migration.up(version: 15)` (`down(version: 14)`); on very large
